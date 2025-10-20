@@ -482,6 +482,9 @@ class YTMPDaemon:
             conn: Socket connection to handle.
         """
         try:
+            # Set timeout to prevent indefinite blocking (5 seconds)
+            conn.settimeout(5.0)
+
             # Read command (up to 1KB)
             data = conn.recv(1024).decode("utf-8").strip()
             if not data:
@@ -524,6 +527,13 @@ class YTMPDaemon:
             # Send response
             conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
 
+        except socket.timeout:
+            logger.warning("Socket connection timed out waiting for command")
+            try:
+                error_response = {"success": False, "error": "Connection timeout"}
+                conn.sendall((json.dumps(error_response) + "\n").encode("utf-8"))
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"Error handling socket connection: {e}", exc_info=True)
             try:

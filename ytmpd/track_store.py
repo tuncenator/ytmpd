@@ -109,6 +109,7 @@ class TrackStore:
         Note:
             When stream_url is None, the track is saved with metadata only.
             The proxy server will resolve the URL on-demand when the track is played.
+            The updated_at timestamp is only changed when stream_url is actually updated.
         """
         with self._lock:
             with self.conn:
@@ -122,7 +123,9 @@ class TrackStore:
                                           ELSE stream_url END,
                         artist = excluded.artist,
                         title = excluded.title,
-                        updated_at = excluded.updated_at
+                        updated_at = CASE WHEN excluded.stream_url IS NOT NULL
+                                          THEN excluded.updated_at
+                                          ELSE updated_at END
                     """,
                     (video_id, stream_url, artist, title, time.time())
                 )
@@ -147,12 +150,14 @@ class TrackStore:
             >>> if track:
             ...     print(f"{track['artist']} - {track['title']}")
         """
-        cursor = self.conn.execute(
-            "SELECT * FROM tracks WHERE video_id = ?",
-            (video_id,)
-        )
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        # Protect read operation with lock to prevent race conditions
+        with self._lock:
+            cursor = self.conn.execute(
+                "SELECT * FROM tracks WHERE video_id = ?",
+                (video_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     def update_stream_url(self, video_id: str, stream_url: str) -> None:
         """Update the stream URL for an existing track.

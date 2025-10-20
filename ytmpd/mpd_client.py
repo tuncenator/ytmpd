@@ -248,6 +248,10 @@ class MPDClient:
     ) -> None:
         """Create M3U playlist (original implementation)."""
         try:
+            # Validate playlist name to prevent path traversal attacks
+            if '/' in name or '\\' in name or '..' in name:
+                raise ValueError(f"Invalid playlist name (contains path separators): {name}")
+
             # Get MPD's playlist directory
             playlist_dir = self.get_playlist_directory()
             playlist_file = playlist_dir / f"{name}.m3u"
@@ -299,6 +303,10 @@ class MPDClient:
             )
 
         try:
+            # Validate playlist name to prevent path traversal attacks
+            if '/' in name or '\\' in name or '..' in name:
+                raise ValueError(f"Invalid playlist name (contains path separators): {name}")
+
             # Create _youtube subdirectory in music directory
             music_dir = Path(mpd_music_directory).expanduser()
             youtube_dir = music_dir / "_youtube"

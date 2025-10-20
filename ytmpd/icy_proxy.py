@@ -300,6 +300,19 @@ class ICYProxyServer:
                 f"track={icy_name}"
             )
 
+            # Validate stream URL before redirecting
+            if not stream_url:
+                logger.error(f"[PROXY] stream_url is None for {video_id}")
+                raise web.HTTPBadGateway(
+                    text=f"Stream URL is missing for video_id: {video_id}"
+                )
+
+            if not isinstance(stream_url, str) or not stream_url.startswith(('http://', 'https://')):
+                logger.error(f"[PROXY] Invalid stream_url format for {video_id}: {stream_url[:100] if stream_url else 'None'}")
+                raise web.HTTPBadGateway(
+                    text=f"Invalid stream URL format for video_id: {video_id}"
+                )
+
             # Return HTTP 307 redirect to direct YouTube URL
             # This allows MPD to stream directly from YouTube while we handle URL resolution/refresh
             logger.debug(f"[PROXY] Redirecting to YouTube URL for {video_id}")
