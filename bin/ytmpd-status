@@ -6,7 +6,15 @@ with special handling for YouTube-streamed vs local tracks.
 
 Environment Variables:
     YTMPD_STATUS_MAX_LENGTH: Maximum length before truncation (default: 50)
-    YTMPD_STATUS_FORMAT: Custom format string (default: "{icon} {artist} - {title} [{position}/{duration}]")
+    YTMPD_STATUS_BAR_LENGTH: Progress bar length in characters (default: 10)
+    YTMPD_STATUS_SHOW_BAR: Enable/disable progress bar (default: true)
+    YTMPD_STATUS_BAR_STYLE: Force specific bar style - 'blocks', 'smooth', or 'simple'
+                            (default: auto-detect based on track type)
+
+Progress Bar Styles:
+    blocks: █████░░░░░ (used for local tracks)
+    smooth: ▰▰▰▰▰▱▱▱▱▱ (used for YouTube tracks)
+    simple: #####----- (ASCII fallback)
 
 Color Codes (for i3blocks):
     YouTube Playing: #FF6B35 (orange)
@@ -117,10 +125,71 @@ def truncate(text: str, max_length: int) -> str:
     return text[: max_length - 3] + "..."
 
 
+def calculate_progress(elapsed: float, duration: float, bar_length: int) -> int:
+    """Calculate number of filled blocks in progress bar.
+
+    Args:
+        elapsed: Current playback position in seconds.
+        duration: Total track duration in seconds.
+        bar_length: Total length of progress bar in characters.
+
+    Returns:
+        Number of filled blocks (0 to bar_length).
+    """
+    # Handle edge cases
+    if duration <= 0:
+        return 0
+    if elapsed <= 0:
+        return 0
+    if elapsed >= duration:
+        return bar_length
+
+    # Calculate filled portion
+    progress_ratio = elapsed / duration
+    filled_blocks = int(progress_ratio * bar_length)
+
+    # Ensure within bounds
+    return max(0, min(filled_blocks, bar_length))
+
+
+def render_progress_bar(filled: int, total_length: int, style: str = "blocks") -> str:
+    """Render progress bar with specified style.
+
+    Args:
+        filled: Number of filled blocks.
+        total_length: Total bar length in characters.
+        style: Bar style - 'blocks', 'smooth', or 'simple'.
+
+    Returns:
+        Rendered progress bar string.
+    """
+    # Define style characters
+    styles = {
+        "blocks": {"filled": "█", "empty": "░"},
+        "smooth": {"filled": "▰", "empty": "▱"},
+        "simple": {"filled": "#", "empty": "-"},
+    }
+
+    # Get characters for the specified style (default to blocks if unknown)
+    chars = styles.get(style, styles["blocks"])
+    filled_char = chars["filled"]
+    empty_char = chars["empty"]
+
+    # Ensure filled is within bounds
+    filled = max(0, min(filled, total_length))
+    empty = total_length - filled
+
+    # Build the bar
+    return filled_char * filled + empty_char * empty
+
+
 def main() -> None:
     """Display MPD/ytmpd status for i3blocks."""
     # Get configuration from environment
     max_length = int(os.environ.get("YTMPD_STATUS_MAX_LENGTH", "50"))
+    bar_length = int(os.environ.get("YTMPD_STATUS_BAR_LENGTH", "10"))
+    show_bar = os.environ.get("YTMPD_STATUS_SHOW_BAR", "true").lower() in ("true", "1", "yes")
+    bar_style = os.environ.get("YTMPD_STATUS_BAR_STYLE", "")  # Empty means auto-detect
 
     # Connect to MPD
     client = get_mpd_client()
@@ -179,8 +248,31 @@ def main() -> None:
             icon = "⏹"
             color = "#808080"  # Gray for stopped
 
+        # Build progress bar if enabled
+        progress_bar_str = ""
+        if show_bar:
+            # Convert elapsed and duration to float for calculation
+            try:
+                elapsed_float = float(elapsed)
+                duration_float = float(duration)
+
+                # Only show bar if we have a valid duration
+                if duration_float > 0:
+                    # Determine bar style (auto-detect based on track type if not specified)
+                    if bar_style:
+                        style = bar_style
+                    else:
+                        style = "smooth" if track_type == "youtube" else "blocks"
+
+                    # Calculate and render progress bar
+                    filled_blocks = calculate_progress(elapsed_float, duration_float, bar_length)
+                    progress_bar_str = " " + render_progress_bar(filled_blocks, bar_length, style)
+            except (ValueError, TypeError):
+                # If timing info is invalid, don't show bar
+                pass
+
         # Build output string
-        output = f"{icon} {artist} - {title} [{position_str}/{duration_str}]"
+        output = f"{icon} {artist} - {title} [{position_str}{progress_bar_str} {duration_str}]"
 
         # Truncate if needed
         output = truncate(output, max_length)
