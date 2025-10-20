@@ -49,3 +49,15 @@ bindsym $mod+Shift+m exec --no-startup-id /path/to/ytmpd/bin/ytmpctl play "$(ech
 # bindsym XF86AudioNext exec --no-startup-id /path/to/ytmpd/bin/ytmpctl next
 # bindsym XF86AudioPrev exec --no-startup-id /path/to/ytmpd/bin/ytmpctl prev
 # bindsym XF86AudioStop exec --no-startup-id /path/to/ytmpd/bin/ytmpctl stop
+
+# ===== Radio and Search Features =====
+
+# Generate radio playlist from currently playing track
+bindsym $mod+Shift+r exec --no-startup-id /path/to/ytmpd/bin/ytmpctl radio
+
+# Generate radio and auto-apply (clear queue, load radio, play)
+bindsym $mod+Shift+Alt+r exec --no-startup-id /path/to/ytmpd/bin/ytmpctl radio --apply
+
+# Open interactive search in terminal
+# Requires a terminal emulator - adjust 'alacritty' to your preferred terminal
+bindsym $mod+Shift+f exec --no-startup-id alacritty -e /path/to/ytmpd/bin/ytmpctl search

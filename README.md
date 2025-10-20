@@ -348,6 +348,91 @@ $ mpc pause
 [paused] #2/52   0:05/7:06 (1%)
 ```
 
+### Radio and Search Features
+
+ytmpd includes two additional features for discovering and playing music:
+
+#### Generate Radio Playlist
+
+Generate a personalized radio playlist based on the currently playing track:
+
+```bash
+$ ytmpctl radio
+Generating radio playlist from current track...
+✓ Radio playlist created: 25 tracks
+
+Playlist 'YT: Radio' is ready in MPD.
+To load and play:
+  mpc load "_youtube/YT: Radio.xspf"
+  mpc play
+```
+
+The radio feature:
+1. Detects the currently playing YouTube Music track
+2. Uses YouTube Music's recommendation algorithm to generate related tracks
+3. Creates an XSPF playlist file at `~/Music/_youtube/YT: Radio.xspf`
+4. Default limit: 25 tracks (configurable via `radio_playlist_limit` in config.yaml)
+
+**Auto-apply mode** (immediately load and play):
+```bash
+$ ytmpctl radio --apply
+Generating radio playlist from current track...
+✓ Radio playlist created: 25 tracks
+
+Applying radio playlist to MPD...
+✓ Radio playlist loaded and playing!
+```
+
+**Error handling:**
+- No track playing: "No track currently playing"
+- Current track is not from YouTube: "Current track is not a YouTube track"
+
+#### Interactive Search
+
+Search YouTube Music and take actions on results:
+
+```bash
+$ ytmpctl search
+Search YouTube Music:
+> miles davis kind of blue
+
+Search results for "miles davis kind of blue":
+
+  1. So What - Miles Davis (9:22)
+  2. Freddie Freeloader - Miles Davis (9:33)
+  3. Blue in Green - Miles Davis (5:37)
+  4. All Blues - Miles Davis (11:33)
+  5. Flamenco Sketches - Miles Davis (9:26)
+  [... more results ...]
+
+Enter number (1-20), or 'q' to quit:
+> 2
+
+Selected: Freddie Freeloader - Miles Davis
+
+Actions:
+  1. Play now
+  2. Add to queue
+  3. Start radio from this song
+  4. Cancel
+
+Enter choice (1-4):
+> 1
+
+✓ Now playing: Freddie Freeloader - Miles Davis
+```
+
+**Available actions:**
+- **Play now**: Clear MPD queue and play the selected track immediately
+- **Add to queue**: Append track to queue without interrupting current playback
+- **Start radio**: Generate a radio playlist from the selected track (auto-applies)
+- **Cancel**: Exit without taking action
+
+**Exit options:**
+- Empty query: Press Enter without typing to exit
+- During selection: Type 'q' to quit
+- Ctrl+C: Cancel at any prompt
+
 ## i3 Integration
 
 ### i3 Keybindings

@@ -32,6 +32,10 @@ def setup_logging(log_level: str, log_file: str) -> None:
     # Root logger configuration
     root_logger = logging.getLogger()
     root_logger.setLevel(numeric_level)
+
+    # Clear existing handlers to prevent duplicates
+    root_logger.handlers.clear()
+
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
 
