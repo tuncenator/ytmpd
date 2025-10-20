@@ -763,66 +763,196 @@ class YTMPDaemon:
             return {"success": False, "error": f"Radio generation failed: {str(e)}"}
 
     def _cmd_search(self, query: str | None) -> dict[str, Any]:
-        """Handle 'search' command - search YouTube Music (stub).
+        """Handle 'search' command - search YouTube Music.
 
         Args:
             query: Search query string.
 
         Returns:
-            Response dict with success status.
+            Response dict with success status and search results.
         """
         logger.info(f"Search command received: query={query}")
 
-        # Validate query
-        if query is None or not query.strip():
-            return {"success": False, "error": "Empty search query"}
+        try:
+            # Validate query
+            if query is None or not query.strip():
+                return {"success": False, "error": "Empty search query"}
 
-        return {
-            "success": True,
-            "message": "Command received: search (not yet implemented)",
-        }
+            # Search YouTube Music (limit to 10 results)
+            logger.info(f"Searching YouTube Music for: {query}")
+            results = self.ytmusic_client.search(query, limit=10)
+
+            if not results:
+                return {"success": True, "results": [], "count": 0}
+
+            # Format results
+            formatted = []
+            for idx, track in enumerate(results, 1):
+                formatted.append({
+                    "number": idx,
+                    "video_id": track.get("video_id", ""),
+                    "title": track.get("title", "Unknown"),
+                    "artist": track.get("artist", "Unknown Artist"),
+                    "duration": self._format_duration(track.get("duration", 0))
+                })
+
+            logger.info(f"Found {len(formatted)} results for: {query}")
+            return {
+                "success": True,
+                "results": formatted,
+                "count": len(formatted)
+            }
+
+        except Exception as e:
+            logger.error(f"Search failed: {e}")
+            return {"success": False, "error": f"Search failed: {str(e)}"}
 
     def _cmd_play(self, video_id: str | None) -> dict[str, Any]:
-        """Handle 'play' command - play track immediately (stub).
+        """Handle 'play' command - play track immediately.
+
+        Clears the current queue, adds the track, and starts playback.
 
         Args:
             video_id: YouTube video ID.
 
         Returns:
-            Response dict with success status.
+            Response dict with success status and track info.
         """
         logger.info(f"Play command received: video_id={video_id}")
 
-        # Validate video_id
-        is_valid, error = self._validate_video_id(video_id)
-        if not is_valid:
-            return {"success": False, "error": error}
+        try:
+            # Validate video_id
+            is_valid, error = self._validate_video_id(video_id)
+            if not is_valid:
+                return {"success": False, "error": error}
 
-        return {
-            "success": True,
-            "message": "Command received: play (not yet implemented)",
-        }
+            # Get track metadata
+            track_info = self._get_track_info(video_id)
+
+            # Check if proxy is enabled for on-demand resolution
+            lazy_resolution = self.proxy_config and self.proxy_config.get("enabled", False)
+
+            if lazy_resolution:
+                # Use proxy URL directly (stream will be resolved on-demand)
+                proxy_port = self.proxy_config.get("port", 6602)
+                proxy_url = f"http://localhost:{proxy_port}/proxy/{video_id}"
+                logger.info(f"Using proxy URL for on-demand resolution: {proxy_url}")
+            else:
+                # Resolve stream URL now
+                logger.info(f"Resolving stream URL for video ID: {video_id}")
+                proxy_url = self.stream_resolver.resolve_video_id(video_id)
+                if not proxy_url:
+                    return {"success": False, "error": "Failed to resolve stream URL"}
+
+            # Clear queue, add track, start playback
+            logger.info(f"Playing track: {track_info['title']} - {track_info['artist']}")
+            self.mpd_client._client.clear()
+            self.mpd_client._client.add(proxy_url)
+            self.mpd_client._client.play()
+
+            return {
+                "success": True,
+                "message": f"Now playing: {track_info['title']} - {track_info['artist']}",
+                "title": track_info['title'],
+                "artist": track_info['artist']
+            }
+
+        except Exception as e:
+            logger.error(f"Play command failed: {e}")
+            return {"success": False, "error": f"Play failed: {str(e)}"}
 
     def _cmd_queue(self, video_id: str | None) -> dict[str, Any]:
-        """Handle 'queue' command - add track to queue (stub).
+        """Handle 'queue' command - add track to queue.
+
+        Adds track to MPD queue without interrupting current playback.
 
         Args:
             video_id: YouTube video ID.
 
         Returns:
-            Response dict with success status.
+            Response dict with success status and track info.
         """
         logger.info(f"Queue command received: video_id={video_id}")
 
-        # Validate video_id
-        is_valid, error = self._validate_video_id(video_id)
-        if not is_valid:
-            return {"success": False, "error": error}
+        try:
+            # Validate video_id
+            is_valid, error = self._validate_video_id(video_id)
+            if not is_valid:
+                return {"success": False, "error": error}
 
-        return {
-            "success": True,
-            "message": "Command received: queue (not yet implemented)",
-        }
+            # Get track metadata
+            track_info = self._get_track_info(video_id)
+
+            # Check if proxy is enabled for on-demand resolution
+            lazy_resolution = self.proxy_config and self.proxy_config.get("enabled", False)
+
+            if lazy_resolution:
+                # Use proxy URL directly (stream will be resolved on-demand)
+                proxy_port = self.proxy_config.get("port", 6602)
+                proxy_url = f"http://localhost:{proxy_port}/proxy/{video_id}"
+                logger.info(f"Using proxy URL for on-demand resolution: {proxy_url}")
+            else:
+                # Resolve stream URL now
+                logger.info(f"Resolving stream URL for video ID: {video_id}")
+                proxy_url = self.stream_resolver.resolve_video_id(video_id)
+                if not proxy_url:
+                    return {"success": False, "error": "Failed to resolve stream URL"}
+
+            # Add to queue (doesn't interrupt current playback)
+            logger.info(f"Adding to queue: {track_info['title']} - {track_info['artist']}")
+            self.mpd_client._client.add(proxy_url)
+
+            return {
+                "success": True,
+                "message": f"Added to queue: {track_info['title']} - {track_info['artist']}",
+                "title": track_info['title'],
+                "artist": track_info['artist']
+            }
+
+        except Exception as e:
+            logger.error(f"Queue command failed: {e}")
+            return {"success": False, "error": f"Queue failed: {str(e)}"}
+
+    def _format_duration(self, seconds: int) -> str:
+        """Format duration in seconds as MM:SS.
+
+        Args:
+            seconds: Duration in seconds.
+
+        Returns:
+            Formatted duration string (e.g., "3:45").
+        """
+        if not seconds or seconds <= 0:
+            return "Unknown"
+        mins = seconds // 60
+        secs = seconds % 60
+        return f"{mins}:{secs:02d}"
+
+    def _get_track_info(self, video_id: str) -> dict[str, str]:
+        """Get track metadata from YouTube Music.
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            Dictionary with 'title' and 'artist' keys.
+        """
+        try:
+            # Use YTMusicClient to search for track info by video ID
+            # The search API doesn't support direct video ID lookup, so we use a workaround
+            # by searching for the video ID itself (which often returns the track)
+            results = self.ytmusic_client.search(video_id, limit=1)
+            if results and len(results) > 0:
+                track = results[0]
+                return {
+                    "title": track.get("title", "Unknown"),
+                    "artist": track.get("artist", "Unknown Artist")
+                }
+        except Exception as e:
+            logger.warning(f"Failed to get track info for {video_id}: {e}")
+
+        # Fallback to unknown metadata
+        return {"title": "Unknown", "artist": "Unknown Artist"}
 
     def _signal_handler(self, signum: int, frame: Any) -> None:
         """Handle signals.
