@@ -36,7 +36,8 @@ import sys
 import time
 from pathlib import Path
 
-from mpd import MPDClient, ConnectionError as MPDConnectionError
+from mpd import ConnectionError as MPDConnectionError
+from mpd import MPDClient
 
 __version__ = "2.1.0"
 
@@ -204,7 +205,6 @@ def get_playlist_context(client: MPDClient) -> dict:
     """
     try:
         status = client.status()
-        current_song = client.currentsong()
 
         # Get current position (0-indexed in MPD, convert to 1-indexed)
         song_pos = status.get("song")
@@ -363,6 +363,7 @@ def adaptive_truncate_status(
     context_suffix: str,
     max_length: int,
     min_bar_length: int = 5,
+    fixed_bar_length: bool = False,
 ) -> str:
     """Adaptively truncate status line with protected elements.
 
@@ -373,6 +374,7 @@ def adaptive_truncate_status(
     Priority (from highest to lowest):
     1. Icon, brackets, timestamps - NEVER truncated
     2. Progress bar - can shrink to min_bar_length (or be hidden entirely)
+       If fixed_bar_length is True, bar never shrinks (only hidden if no space)
     3. Song name - can be truncated with ellipsis
 
     Args:
@@ -385,6 +387,7 @@ def adaptive_truncate_status(
         context_suffix: Additional context like "[Resolving...]" or position.
         max_length: Maximum total output length.
         min_bar_length: Minimum progress bar length before hiding it.
+        fixed_bar_length: If True, never shrink the bar (only show at full length or hide).
 
     Returns:
         Formatted and truncated status string.
@@ -415,7 +418,10 @@ def adaptive_truncate_status(
     # If we can't even fit the bare minimum, just truncate everything
     if available_space < min_song_length:
         # Emergency fallback: just show what we can
-        result = f"{icon} {artist} - {title} [{position_str} {progress_bar_str} {duration_str}]{context_suffix}"
+        result = (
+            f"{icon} {artist} - {title} "
+            f"[{position_str} {progress_bar_str} {duration_str}]{context_suffix}"
+        )
         return result[: max_length - 1] + ellipsis if len(result) > max_length else result
 
     # Try to fit: song name + full progress bar
@@ -431,8 +437,8 @@ def adaptive_truncate_status(
     current_bar_length = len(progress_bar_str)
     bar_to_use = progress_bar_str
 
-    # Try shrinking the progress bar first
-    if current_bar_length > min_bar_length:
+    # Try shrinking the progress bar first (only if not fixed)
+    if not fixed_bar_length and current_bar_length > min_bar_length:
         # Calculate how much we need to shrink
         needed_space = full_output_length - available_space
         new_bar_length = max(min_bar_length, current_bar_length - needed_space)
@@ -470,6 +476,7 @@ def adaptive_truncate_status(
             return f"{icon} {song_name} [{position_str}{bar_part} {duration_str}]{context_suffix}"
 
     # Still doesn't fit - try hiding the bar entirely
+    # (or if fixed_bar_length, skip straight to this)
     if full_output_length > available_space:
         # Hide the bar and use all space for song name
         available_for_song = available_space
@@ -518,9 +525,7 @@ def validate_color(color: str) -> str:
         argparse.ArgumentTypeError: If color format is invalid.
     """
     if not re.match(r"^#[0-9A-Fa-f]{6}$", color):
-        raise argparse.ArgumentTypeError(
-            f"Invalid color format: {color}. Expected format: #RRGGBB"
-        )
+        raise argparse.ArgumentTypeError(f"Invalid color format: {color}. Expected format: #RRGGBB")
     return color
 
 
@@ -542,9 +547,7 @@ def validate_port(value: str) -> int:
             raise ValueError
         return port
     except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"Invalid port: {value}. Must be between 1 and 65535"
-        )
+        raise argparse.ArgumentTypeError(f"Invalid port: {value}. Must be between 1 and 65535")
 
 
 def validate_positive_int(value: str, min_val: int, max_val: int, name: str) -> int:
@@ -646,8 +649,7 @@ Examples:
         "-c",
         "--compact",
         action="store_true",
-        default=os.environ.get("YTMPD_STATUS_COMPACT", "false").lower()
-        in ("true", "1", "yes"),
+        default=os.environ.get("YTMPD_STATUS_COMPACT", "false").lower() in ("true", "1", "yes"),
         help="Use compact display mode",
     )
 
@@ -678,21 +680,29 @@ Examples:
         default=os.environ.get("YTMPD_STATUS_BAR_STYLE", "auto"),
         help="Progress bar style (default: auto)",
     )
+    bar_group.add_argument(
+        "--fixed-bar-length",
+        action="store_true",
+        default=os.environ.get("YTMPD_STATUS_FIXED_BAR_LENGTH", "false").lower()
+        in ("true", "1", "yes"),
+        help=(
+            "Prevent progress bar from shrinking "
+            "(always show at full --bar-length or hide entirely)"
+        ),
+    )
 
     # Playlist context options
     playlist_group = parser.add_argument_group("Playlist Context Options")
     playlist_group.add_argument(
         "--show-next",
         action="store_true",
-        default=os.environ.get("YTMPD_STATUS_SHOW_NEXT", "false").lower()
-        in ("true", "1", "yes"),
+        default=os.environ.get("YTMPD_STATUS_SHOW_NEXT", "false").lower() in ("true", "1", "yes"),
         help="Show next track",
     )
     playlist_group.add_argument(
         "--show-prev",
         action="store_true",
-        default=os.environ.get("YTMPD_STATUS_SHOW_PREV", "false").lower()
-        in ("true", "1", "yes"),
+        default=os.environ.get("YTMPD_STATUS_SHOW_PREV", "false").lower() in ("true", "1", "yes"),
         help="Show previous track",
     )
     playlist_group.add_argument(
@@ -809,9 +819,7 @@ def format_with_template(template: str, data: dict) -> str:
     for key, value in data.items():
         placeholder = f"{{{key}}}"
         if placeholder in output:
-            output = output.replace(
-                placeholder, str(value) if value is not None else ""
-            )
+            output = output.replace(placeholder, str(value) if value is not None else "")
 
     return output
 
@@ -971,9 +979,7 @@ def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
                         filled_blocks = calculate_progress(
                             elapsed_float, duration_float, bar_length
                         )
-                        progress_bar_str = render_progress_bar(
-                            filled_blocks, bar_length, bar_style
-                        )
+                        progress_bar_str = render_progress_bar(filled_blocks, bar_length, bar_style)
                 except (ValueError, TypeError):
                     pass
 
@@ -1022,9 +1028,7 @@ def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
                             filled_blocks = calculate_progress(
                                 elapsed_float, duration_float, bar_length
                             )
-                            progress_bar_str = render_progress_bar(
-                                filled_blocks, bar_length, style
-                            )
+                            progress_bar_str = render_progress_bar(filled_blocks, bar_length, style)
                     except (ValueError, TypeError):
                         pass
 
@@ -1055,6 +1059,7 @@ def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
                     context_suffix=context_suffix,
                     max_length=max_length,
                     min_bar_length=5,
+                    fixed_bar_length=args.fixed_bar_length,
                 )
 
         # Truncate if needed (for compact mode or custom format)
@@ -1144,9 +1149,7 @@ def run_idle_mode(args) -> None:
                             file=sys.stderr,
                         )
                     time.sleep(reconnect_delay)
-                    reconnect_delay = min(
-                        reconnect_delay * 2, 30
-                    )  # Exponential backoff, max 30s
+                    reconnect_delay = min(reconnect_delay * 2, 30)  # Exponential backoff, max 30s
                     continue
 
                 # Reset reconnect delay on successful connection
@@ -1191,7 +1194,7 @@ def run_idle_mode(args) -> None:
             if client:
                 try:
                     client.close()
-                except:
+                except Exception:
                     pass
                 client = None
 
@@ -1209,7 +1212,7 @@ def run_idle_mode(args) -> None:
             if client:
                 try:
                     client.close()
-                except:
+                except Exception:
                     pass
                 client = None
 
@@ -1220,7 +1223,7 @@ def run_idle_mode(args) -> None:
     if client:
         try:
             client.close()
-        except:
+        except Exception:
             pass
 
     if args.verbose:
@@ -1341,9 +1344,7 @@ def main() -> None:
                         filled_blocks = calculate_progress(
                             elapsed_float, duration_float, bar_length
                         )
-                        progress_bar_str = render_progress_bar(
-                            filled_blocks, bar_length, style
-                        )
+                        progress_bar_str = render_progress_bar(filled_blocks, bar_length, style)
                 except (ValueError, TypeError):
                     pass
 
@@ -1356,9 +1357,7 @@ def main() -> None:
                 "elapsed": position_str,
                 "duration": duration_str,
                 "bar": progress_bar_str,
-                "position": (
-                    playlist_ctx["current_pos"] if playlist_ctx["current_pos"] else ""
-                ),
+                "position": (playlist_ctx["current_pos"] if playlist_ctx["current_pos"] else ""),
                 "total": playlist_ctx["total"] if playlist_ctx["total"] else "",
                 "next": (
                     f"{playlist_ctx['next']['artist']} - {playlist_ctx['next']['title']}"
@@ -1400,9 +1399,7 @@ def main() -> None:
                         filled_blocks = calculate_progress(
                             elapsed_float, duration_float, bar_length
                         )
-                        progress_bar_str = render_progress_bar(
-                            filled_blocks, bar_length, style
-                        )
+                        progress_bar_str = render_progress_bar(filled_blocks, bar_length, style)
                 except (ValueError, TypeError):
                     # If timing info is invalid, don't show bar
                     pass
@@ -1412,10 +1409,7 @@ def main() -> None:
             if sync_status == "unresolved":
                 # YouTube track not yet resolved
                 context_suffix = " [Resolving...]"
-            elif (
-                playlist_ctx["current_pos"] is not None
-                and playlist_ctx["total"] is not None
-            ):
+            elif playlist_ctx["current_pos"] is not None and playlist_ctx["total"] is not None:
                 pos = playlist_ctx["current_pos"]
                 total = playlist_ctx["total"]
                 # Show position for first, last, or single track
@@ -1437,6 +1431,7 @@ def main() -> None:
                 context_suffix=context_suffix,
                 max_length=max_length,
                 min_bar_length=5,
+                fixed_bar_length=args.fixed_bar_length,
             )
 
         # Truncate if needed (for compact mode or custom format)
