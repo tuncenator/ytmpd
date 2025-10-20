@@ -367,8 +367,9 @@ async def test_handle_proxy_request_with_url_refresh(populated_store: TrackStore
         port=8888
     )
 
-    # Call handler
-    response = await proxy._handle_proxy_request(mock_request)
+    # Call handler - should raise HTTPTemporaryRedirect
+    with pytest.raises(web.HTTPTemporaryRedirect) as exc_info:
+        await proxy._handle_proxy_request(mock_request)
 
     # Verify URL refresh was called
     mock_resolver.resolve_video_id.assert_called_once_with("expired_vid")
@@ -378,8 +379,7 @@ async def test_handle_proxy_request_with_url_refresh(populated_store: TrackStore
     assert track["stream_url"] == "https://new-url.com/stream"
 
     # Verify response is HTTP redirect to new URL
-    assert isinstance(response, web.HTTPTemporaryRedirect)
-    assert response.location == "https://new-url.com/stream"
+    assert exc_info.value.location == "https://new-url.com/stream"
 
 
 @pytest.mark.asyncio
@@ -416,12 +416,12 @@ async def test_handle_proxy_request_url_refresh_failure_continues(populated_stor
         port=8888
     )
 
-    # Should not raise, should continue with old URL
-    response = await proxy._handle_proxy_request(mock_request)
+    # Should raise HTTPTemporaryRedirect, continuing with old URL after refresh failure
+    with pytest.raises(web.HTTPTemporaryRedirect) as exc_info:
+        await proxy._handle_proxy_request(mock_request)
 
     # Verify response is HTTP redirect to old URL (fallback after refresh failure)
-    assert isinstance(response, web.HTTPTemporaryRedirect)
-    assert response.location == "https://old-url.com/stream"
+    assert exc_info.value.location == "https://old-url.com/stream"
 
 
 @pytest.mark.asyncio
@@ -441,10 +441,10 @@ async def test_handle_proxy_request_redirect_success(populated_store: TrackStore
 
     proxy = ICYProxyServer(populated_store, host="localhost", port=8888)
 
-    # Call handler
-    response = await proxy._handle_proxy_request(mock_request)
+    # Call handler - should raise HTTPTemporaryRedirect
+    with pytest.raises(web.HTTPTemporaryRedirect) as exc_info:
+        await proxy._handle_proxy_request(mock_request)
 
     # Verify response is HTTP 307 redirect
-    assert isinstance(response, web.HTTPTemporaryRedirect)
-    assert response.location == "https://youtube.com/stream/test1"
+    assert exc_info.value.location == "https://youtube.com/stream/test1"
 

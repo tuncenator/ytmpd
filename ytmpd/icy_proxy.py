@@ -316,7 +316,7 @@ class ICYProxyServer:
             # Return HTTP 307 redirect to direct YouTube URL
             # This allows MPD to stream directly from YouTube while we handle URL resolution/refresh
             logger.debug(f"[PROXY] Redirecting to YouTube URL for {video_id}")
-            return web.HTTPTemporaryRedirect(stream_url)
+            raise web.HTTPTemporaryRedirect(stream_url)
 
         except web.HTTPException:
             # Re-raise HTTP exceptions (they're already properly formatted)

@@ -83,10 +83,7 @@ def get_track_type(file_path: str) -> str:
         cursor = conn.cursor()
 
         # Query for this file path
-        cursor.execute(
-            "SELECT COUNT(*) FROM tracks WHERE file = ?",
-            (file_path,)
-        )
+        cursor.execute("SELECT COUNT(*) FROM tracks WHERE file = ?", (file_path,))
         count = cursor.fetchone()[0]
         conn.close()
 
@@ -279,10 +276,7 @@ def get_sync_status(file_path: str) -> str:
         cursor = conn.cursor()
 
         # Check if stream_url is NULL (unresolved)
-        cursor.execute(
-            "SELECT stream_url FROM tracks WHERE video_id = ?",
-            (video_id,)
-        )
+        cursor.execute("SELECT stream_url FROM tracks WHERE video_id = ?", (video_id,))
         result = cursor.fetchone()
         conn.close()
 
@@ -355,7 +349,7 @@ def smart_truncate(text: str, max_length: int) -> str:
     else:
         # Short title - truncate from end
         max_title_len = available_for_rest - 3  # -3 for " - "
-        truncated_title = title_part[:max_title_len - 1] + ellipsis
+        truncated_title = title_part[: max_title_len - 1] + ellipsis
         return f"{artist} - {truncated_title}"
 
 
@@ -663,7 +657,9 @@ def format_with_template(template: str, data: dict) -> str:
     for key, value in data.items():
         placeholder = f"{{{key}}}"
         if placeholder in output:
-            output = output.replace(placeholder, str(value) if value is not None else "")
+            output = output.replace(
+                placeholder, str(value) if value is not None else ""
+            )
 
     return output
 
@@ -814,8 +810,11 @@ def display_status(client: MPDClient, args) -> None:
                     elapsed_float = float(elapsed)
                     duration_float = float(duration)
                     if duration_float > 0:
+                        filled_blocks = calculate_progress(
+                            elapsed_float, duration_float, bar_length
+                        )
                         progress_bar_str = render_progress_bar(
-                            elapsed_float, duration_float, bar_length, bar_style, track_type
+                            filled_blocks, bar_length, bar_style
                         )
                 except (ValueError, TypeError):
                     pass
@@ -859,8 +858,11 @@ def display_status(client: MPDClient, args) -> None:
                         elapsed_float = float(elapsed)
                         duration_float = float(duration)
                         if duration_float > 0:
+                            filled_blocks = calculate_progress(
+                                elapsed_float, duration_float, bar_length
+                            )
                             progress_bar_str = render_progress_bar(
-                                elapsed_float, duration_float, bar_length, bar_style, track_type
+                                filled_blocks, bar_length, bar_style
                             )
                             output += f" {progress_bar_str}"
                     except (ValueError, TypeError):
@@ -943,14 +945,22 @@ def run_idle_mode(args) -> None:
             # Connect if not connected
             if client is None:
                 if args.verbose:
-                    print(f"Connecting to MPD at {args.host}:{args.port}...", file=sys.stderr)
+                    print(
+                        f"Connecting to MPD at {args.host}:{args.port}...",
+                        file=sys.stderr,
+                    )
                 client = get_mpd_client(host=args.host, port=args.port)
 
                 if client is None:
                     if args.verbose:
-                        print(f"MPD not available, retrying in {reconnect_delay}s...", file=sys.stderr)
+                        print(
+                            f"MPD not available, retrying in {reconnect_delay}s...",
+                            file=sys.stderr,
+                        )
                     time.sleep(reconnect_delay)
-                    reconnect_delay = min(reconnect_delay * 2, 30)  # Exponential backoff, max 30s
+                    reconnect_delay = min(
+                        reconnect_delay * 2, 30
+                    )  # Exponential backoff, max 30s
                     continue
 
                 # Reset reconnect delay on successful connection
@@ -986,7 +996,12 @@ def run_idle_mode(args) -> None:
             if args.verbose:
                 print(f"MPD change detected: {changed}", file=sys.stderr)
 
-        except (MPDConnectionError, ConnectionRefusedError, OSError, BrokenPipeError) as e:
+        except (
+            MPDConnectionError,
+            ConnectionRefusedError,
+            OSError,
+            BrokenPipeError,
+        ) as e:
             # Connection lost
             if args.verbose:
                 print(f"MPD connection error: {e}", file=sys.stderr)
@@ -1135,9 +1150,17 @@ def main() -> None:
                     elapsed_float = float(elapsed)
                     duration_float = float(duration)
                     if duration_float > 0:
-                        style = bar_style if bar_style else ("smooth" if track_type == "youtube" else "blocks")
-                        filled_blocks = calculate_progress(elapsed_float, duration_float, bar_length)
-                        progress_bar_str = render_progress_bar(filled_blocks, bar_length, style)
+                        style = (
+                            bar_style
+                            if bar_style
+                            else ("smooth" if track_type == "youtube" else "blocks")
+                        )
+                        filled_blocks = calculate_progress(
+                            elapsed_float, duration_float, bar_length
+                        )
+                        progress_bar_str = render_progress_bar(
+                            filled_blocks, bar_length, style
+                        )
                 except (ValueError, TypeError):
                     pass
 
@@ -1150,10 +1173,20 @@ def main() -> None:
                 "elapsed": position_str,
                 "duration": duration_str,
                 "bar": progress_bar_str,
-                "position": playlist_ctx["current_pos"] if playlist_ctx["current_pos"] else "",
+                "position": (
+                    playlist_ctx["current_pos"] if playlist_ctx["current_pos"] else ""
+                ),
                 "total": playlist_ctx["total"] if playlist_ctx["total"] else "",
-                "next": f"{playlist_ctx['next']['artist']} - {playlist_ctx['next']['title']}" if playlist_ctx["next"] else "",
-                "prev": f"{playlist_ctx['prev']['artist']} - {playlist_ctx['prev']['title']}" if playlist_ctx["prev"] else "",
+                "next": (
+                    f"{playlist_ctx['next']['artist']} - {playlist_ctx['next']['title']}"
+                    if playlist_ctx["next"]
+                    else ""
+                ),
+                "prev": (
+                    f"{playlist_ctx['prev']['artist']} - {playlist_ctx['prev']['title']}"
+                    if playlist_ctx["prev"]
+                    else ""
+                ),
             }
 
             # Format using template
@@ -1181,8 +1214,12 @@ def main() -> None:
                             style = "smooth" if track_type == "youtube" else "blocks"
 
                         # Calculate and render progress bar
-                        filled_blocks = calculate_progress(elapsed_float, duration_float, bar_length)
-                        progress_bar_str = " " + render_progress_bar(filled_blocks, bar_length, style)
+                        filled_blocks = calculate_progress(
+                            elapsed_float, duration_float, bar_length
+                        )
+                        progress_bar_str = " " + render_progress_bar(
+                            filled_blocks, bar_length, style
+                        )
                 except (ValueError, TypeError):
                     # If timing info is invalid, don't show bar
                     pass
@@ -1192,7 +1229,10 @@ def main() -> None:
             if sync_status == "unresolved":
                 # YouTube track not yet resolved
                 context_suffix = " [Resolving...]"
-            elif playlist_ctx["current_pos"] is not None and playlist_ctx["total"] is not None:
+            elif (
+                playlist_ctx["current_pos"] is not None
+                and playlist_ctx["total"] is not None
+            ):
                 pos = playlist_ctx["current_pos"]
                 total = playlist_ctx["total"]
                 # Show position for first, last, or single track
