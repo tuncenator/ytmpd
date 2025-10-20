@@ -502,6 +502,22 @@ class YTMPDaemon:
                 response = self._cmd_list()
             elif cmd == "quit":
                 response = self._cmd_quit()
+            elif cmd == "radio":
+                # Extract video_id argument if provided
+                video_id = parts[1] if len(parts) > 1 else None
+                response = self._cmd_radio(video_id)
+            elif cmd == "search":
+                # Extract search query (rest of command after "search")
+                query = parts[1] if len(parts) > 1 else None
+                response = self._cmd_search(query)
+            elif cmd == "play":
+                # Extract video_id argument
+                video_id = parts[1] if len(parts) > 1 else None
+                response = self._cmd_play(video_id)
+            elif cmd == "queue":
+                # Extract video_id argument
+                video_id = parts[1] if len(parts) > 1 else None
+                response = self._cmd_queue(video_id)
             else:
                 response = {"success": False, "error": f"Unknown command: {cmd}"}
 
@@ -569,6 +585,112 @@ class YTMPDaemon:
         logger.info("Shutdown requested via socket")
         threading.Thread(target=self.stop, daemon=True).start()
         return {"success": True, "message": "Shutting down"}
+
+    def _validate_video_id(self, video_id: str | None) -> tuple[bool, str | None]:
+        """Validate YouTube video ID format.
+
+        Args:
+            video_id: Video ID to validate.
+
+        Returns:
+            Tuple of (is_valid, error_message).
+            If valid, error_message is None.
+        """
+        if video_id is None:
+            return False, "Missing video ID"
+
+        if len(video_id) != 11:
+            return False, "Invalid video ID format (must be 11 characters)"
+
+        # YouTube video IDs are alphanumeric plus - and _
+        if not all(c.isalnum() or c in "-_" for c in video_id):
+            return False, "Invalid video ID format (invalid characters)"
+
+        return True, None
+
+    def _cmd_radio(self, video_id: str | None) -> dict[str, Any]:
+        """Handle 'radio' command - generate radio playlist (stub).
+
+        Args:
+            video_id: YouTube video ID, or None to use current track.
+
+        Returns:
+            Response dict with success status.
+        """
+        logger.info(f"Radio command received: video_id={video_id}")
+
+        # Validate video_id if provided
+        if video_id is not None:
+            is_valid, error = self._validate_video_id(video_id)
+            if not is_valid:
+                return {"success": False, "error": error}
+
+        return {
+            "success": True,
+            "message": "Command received: radio (not yet implemented)",
+        }
+
+    def _cmd_search(self, query: str | None) -> dict[str, Any]:
+        """Handle 'search' command - search YouTube Music (stub).
+
+        Args:
+            query: Search query string.
+
+        Returns:
+            Response dict with success status.
+        """
+        logger.info(f"Search command received: query={query}")
+
+        # Validate query
+        if query is None or not query.strip():
+            return {"success": False, "error": "Empty search query"}
+
+        return {
+            "success": True,
+            "message": "Command received: search (not yet implemented)",
+        }
+
+    def _cmd_play(self, video_id: str | None) -> dict[str, Any]:
+        """Handle 'play' command - play track immediately (stub).
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            Response dict with success status.
+        """
+        logger.info(f"Play command received: video_id={video_id}")
+
+        # Validate video_id
+        is_valid, error = self._validate_video_id(video_id)
+        if not is_valid:
+            return {"success": False, "error": error}
+
+        return {
+            "success": True,
+            "message": "Command received: play (not yet implemented)",
+        }
+
+    def _cmd_queue(self, video_id: str | None) -> dict[str, Any]:
+        """Handle 'queue' command - add track to queue (stub).
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            Response dict with success status.
+        """
+        logger.info(f"Queue command received: video_id={video_id}")
+
+        # Validate video_id
+        is_valid, error = self._validate_video_id(video_id)
+        if not is_valid:
+            return {"success": False, "error": error}
+
+        return {
+            "success": True,
+            "message": "Command received: queue (not yet implemented)",
+        }
 
     def _signal_handler(self, signum: int, frame: Any) -> None:
         """Handle signals.

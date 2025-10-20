@@ -626,3 +626,493 @@ class TestSignalHandling:
         # Verify config reloaded
         assert daemon.config["stream_cache_hours"] == 10
         assert daemon.config["sync_interval_minutes"] == 60
+
+
+@patch("ytmpd.daemon.YTMusicClient")
+@patch("ytmpd.daemon.MPDClient")
+@patch("ytmpd.daemon.StreamResolver")
+@patch("ytmpd.daemon.SyncEngine")
+@patch("ytmpd.daemon.load_config")
+@patch("ytmpd.daemon.get_config_dir")
+class TestDaemonRadioSearchCommands:
+    """Tests for new radio and search commands (Phase 2 stubs)."""
+
+    def test_cmd_radio_stub_with_video_id(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'radio' command with video ID returns stub response."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call radio command with valid video ID
+        response = daemon._cmd_radio("2xOPkdtFeHM")
+
+        # Verify response
+        assert response["success"] is True
+        assert "not yet implemented" in response["message"]
+
+    def test_cmd_radio_stub_without_video_id(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'radio' command without video ID returns stub response."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call radio command without video ID
+        response = daemon._cmd_radio(None)
+
+        # Verify response
+        assert response["success"] is True
+        assert "not yet implemented" in response["message"]
+
+    def test_cmd_radio_invalid_video_id_short(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'radio' command with too short video ID returns error."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call radio command with invalid video ID (too short)
+        response = daemon._cmd_radio("short")
+
+        # Verify error response
+        assert response["success"] is False
+        assert "Invalid video ID format" in response["error"]
+
+    def test_cmd_radio_invalid_video_id_chars(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'radio' command with invalid characters returns error."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call radio command with invalid characters
+        response = daemon._cmd_radio("invalid!@#$")
+
+        # Verify error response
+        assert response["success"] is False
+        assert "Invalid video ID format" in response["error"]
+
+    def test_cmd_search_stub(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'search' command returns stub response."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call search command
+        response = daemon._cmd_search("miles davis")
+
+        # Verify response
+        assert response["success"] is True
+        assert "not yet implemented" in response["message"]
+
+    def test_cmd_search_empty_query(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'search' command with empty query returns error."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call search command with empty query
+        response = daemon._cmd_search("")
+
+        # Verify error response
+        assert response["success"] is False
+        assert "Empty search query" in response["error"]
+
+    def test_cmd_search_whitespace_query(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'search' command with whitespace-only query returns error."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call search command with whitespace query
+        response = daemon._cmd_search("   ")
+
+        # Verify error response
+        assert response["success"] is False
+        assert "Empty search query" in response["error"]
+
+    def test_cmd_search_none_query(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'search' command with None query returns error."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call search command with None
+        response = daemon._cmd_search(None)
+
+        # Verify error response
+        assert response["success"] is False
+        assert "Empty search query" in response["error"]
+
+    def test_cmd_play_stub(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'play' command returns stub response."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call play command
+        response = daemon._cmd_play("2xOPkdtFeHM")
+
+        # Verify response
+        assert response["success"] is True
+        assert "not yet implemented" in response["message"]
+
+    def test_cmd_play_missing_video_id(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'play' command without video ID returns error."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call play command without video ID
+        response = daemon._cmd_play(None)
+
+        # Verify error response
+        assert response["success"] is False
+        assert "Missing video ID" in response["error"]
+
+    def test_cmd_queue_stub(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'queue' command returns stub response."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call queue command
+        response = daemon._cmd_queue("2xOPkdtFeHM")
+
+        # Verify response
+        assert response["success"] is True
+        assert "not yet implemented" in response["message"]
+
+    def test_cmd_queue_invalid_video_id(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test that 'queue' command with invalid video ID returns error."""
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 8080,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Call queue command with invalid video ID
+        response = daemon._cmd_queue("toolong12345")
+
+        # Verify error response
+        assert response["success"] is False
+        assert "Invalid video ID format" in response["error"]
