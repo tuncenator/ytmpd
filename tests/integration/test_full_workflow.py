@@ -129,6 +129,7 @@ class TestFullSyncWorkflow:
         mock_ytmusic.get_playlist_tracks.side_effect = (
             lambda playlist_id: mock_ytmusic_responses["tracks"][playlist_id]
         )
+        mock_ytmusic.get_liked_songs.return_value = []  # No liked songs for this test
 
         # Setup: Create mock MPD client
         mock_mpd = Mock(spec=MPDClient)
@@ -197,6 +198,7 @@ class TestFullSyncWorkflow:
         mock_ytmusic.get_playlist_tracks.return_value = mock_ytmusic_responses[
             "tracks"
         ]["PL1"]
+        mock_ytmusic.get_liked_songs.return_value = []  # No liked songs for this test
 
         mock_mpd = Mock(spec=MPDClient)
         mock_resolver = Mock(spec=StreamResolver)
@@ -424,6 +426,7 @@ class TestPerformanceScenarios:
         mock_ytmusic = Mock(spec=YTMusicClient)
         mock_ytmusic.get_user_playlists.return_value = [large_playlist]
         mock_ytmusic.get_playlist_tracks.return_value = large_tracks
+        mock_ytmusic.get_liked_songs.return_value = []  # No liked songs for this test
 
         mock_mpd = Mock(spec=MPDClient)
         mock_resolver = Mock(spec=StreamResolver)
@@ -491,6 +494,7 @@ class TestPerformanceScenarios:
         mock_ytmusic = Mock(spec=YTMusicClient)
         mock_ytmusic.get_user_playlists.return_value = many_playlists
         mock_ytmusic.get_playlist_tracks.side_effect = get_tracks
+        mock_ytmusic.get_liked_songs.return_value = []  # No liked songs for this test
 
         mock_mpd = Mock(spec=MPDClient)
         mock_resolver = Mock(spec=StreamResolver)

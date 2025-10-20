@@ -111,6 +111,8 @@ class TestSyncAllPlaylists:
                 TrackWithMetadata(url="http://example.com/3.m4a", title="Song 3", artist="Artist 3", video_id="vid3"),
             ],
             proxy_config=None,
+            playlist_format='m3u',
+            mpd_music_directory=None,
         )
         mpd.create_or_replace_playlist.assert_any_call(
             "YT: Workout",
@@ -119,6 +121,8 @@ class TestSyncAllPlaylists:
                 TrackWithMetadata(url="http://example.com/5.m4a", title="Song 5", artist="Artist 5", video_id="vid5"),
             ],
             proxy_config=None,
+            playlist_format='m3u',
+            mpd_music_directory=None,
         )
 
     def test_sync_all_playlists_empty(self):
@@ -179,6 +183,8 @@ class TestSyncAllPlaylists:
                 TrackWithMetadata(url="http://example.com/3.m4a", title="Song 3", artist="Artist 3", video_id="vid3"),
             ],
             proxy_config=None,
+            playlist_format='m3u',
+            mpd_music_directory=None,
         )
 
     def test_sync_all_playlists_all_tracks_fail(self):
@@ -254,6 +260,8 @@ class TestSyncAllPlaylists:
                 TrackWithMetadata(url="http://example.com/4.m4a", title="Song 4", artist="Artist 4", video_id="vid4"),
             ],
             proxy_config=None,
+            playlist_format='m3u',
+            mpd_music_directory=None,
         )
 
     def test_sync_all_playlists_ytmusic_api_error(self):
@@ -327,6 +335,8 @@ class TestSyncAllPlaylists:
             "YouTube - Favorites",
             [TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1")],
             proxy_config=None,
+            playlist_format='m3u',
+            mpd_music_directory=None,
         )
 
 
@@ -370,6 +380,8 @@ class TestSyncSinglePlaylist:
                 TrackWithMetadata(url="http://example.com/2.m4a", title="Song 2", artist="Artist 2", video_id="vid2"),
             ],
             proxy_config=None,
+            playlist_format='m3u',
+            mpd_music_directory=None,
         )
 
     def test_sync_single_playlist_not_found(self):
@@ -671,4 +683,6 @@ class TestSyncEngineIntegration:
                 TrackWithMetadata(url="http://example.com/2.m4a", title="Song 2", artist="Artist 2", video_id="vid2"),
             ],
             proxy_config=None,
+            playlist_format='m3u',
+            mpd_music_directory=None,
         )

@@ -392,7 +392,7 @@ class TestMPDClientPlaylists:
         with pytest.raises(MPDPlaylistError) as exc_info:
             client.create_or_replace_playlist("Test Playlist", tracks)
 
-        assert "Unexpected error creating playlist" in str(exc_info.value)
+        assert "Error creating M3U playlist" in str(exc_info.value)
 
     @patch("ytmpd.mpd_client.MPDClientBase")
     @patch("ytmpd.mpd_client.Path")

@@ -367,10 +367,6 @@ async def test_handle_proxy_request_with_url_refresh(populated_store: TrackStore
         port=8888
     )
 
-    # Mock _proxy_stream to avoid actual HTTP requests
-    mock_response = Mock(spec=web.StreamResponse)
-    proxy._proxy_stream = AsyncMock(return_value=mock_response)
-
     # Call handler
     response = await proxy._handle_proxy_request(mock_request)
 
@@ -381,10 +377,9 @@ async def test_handle_proxy_request_with_url_refresh(populated_store: TrackStore
     track = populated_store.get_track("expired_vid")
     assert track["stream_url"] == "https://new-url.com/stream"
 
-    # Verify _proxy_stream was called with new URL
-    proxy._proxy_stream.assert_called_once()
-    call_args = proxy._proxy_stream.call_args
-    assert call_args[0][1] == "https://new-url.com/stream"  # stream_url argument
+    # Verify response is HTTP redirect to new URL
+    assert isinstance(response, web.HTTPTemporaryRedirect)
+    assert response.location == "https://new-url.com/stream"
 
 
 @pytest.mark.asyncio
@@ -421,24 +416,17 @@ async def test_handle_proxy_request_url_refresh_failure_continues(populated_stor
         port=8888
     )
 
-    # Mock _proxy_stream
-    mock_response = Mock(spec=web.StreamResponse)
-    proxy._proxy_stream = AsyncMock(return_value=mock_response)
-
     # Should not raise, should continue with old URL
     response = await proxy._handle_proxy_request(mock_request)
 
-    # Verify _proxy_stream was called with old URL
-    proxy._proxy_stream.assert_called_once()
-    call_args = proxy._proxy_stream.call_args
-    assert call_args[0][1] == "https://old-url.com/stream"
+    # Verify response is HTTP redirect to old URL (fallback after refresh failure)
+    assert isinstance(response, web.HTTPTemporaryRedirect)
+    assert response.location == "https://old-url.com/stream"
 
 
 @pytest.mark.asyncio
-async def test_handle_proxy_request_timeout_error(populated_store: TrackStore) -> None:
-    """Test TimeoutError handling in _handle_proxy_request."""
-    import asyncio
-
+async def test_handle_proxy_request_redirect_success(populated_store: TrackStore) -> None:
+    """Test successful HTTP redirect response."""
     # Add track to store
     populated_store.add_track(
         video_id="test_video1",
@@ -453,289 +441,10 @@ async def test_handle_proxy_request_timeout_error(populated_store: TrackStore) -
 
     proxy = ICYProxyServer(populated_store, host="localhost", port=8888)
 
-    # Mock _proxy_stream to raise TimeoutError
-    proxy._proxy_stream = AsyncMock(side_effect=asyncio.TimeoutError())
+    # Call handler
+    response = await proxy._handle_proxy_request(mock_request)
 
-    # Should convert to HTTPGatewayTimeout
-    with pytest.raises(web.HTTPGatewayTimeout):
-        await proxy._handle_proxy_request(mock_request)
+    # Verify response is HTTP 307 redirect
+    assert isinstance(response, web.HTTPTemporaryRedirect)
+    assert response.location == "https://youtube.com/stream/test1"
 
-
-@pytest.mark.asyncio
-async def test_handle_proxy_request_youtube_stream_error(populated_store: TrackStore) -> None:
-    """Test YouTubeStreamError handling in _handle_proxy_request."""
-    from ytmpd.exceptions import YouTubeStreamError
-
-    # Add track to store
-    populated_store.add_track(
-        video_id="test_video2",
-        stream_url="https://youtube.com/stream/test2",
-        title="Test Video 2",
-        artist="Test Artist"
-    )
-
-    mock_request = Mock(spec=web.Request)
-    mock_request.remote = "127.0.0.1"
-    mock_request.match_info = {"video_id": "test_video2"}
-
-    proxy = ICYProxyServer(populated_store, host="localhost", port=8888)
-
-    # Mock _proxy_stream to raise YouTubeStreamError
-    proxy._proxy_stream = AsyncMock(side_effect=YouTubeStreamError("Stream failed"))
-
-    # Should convert to HTTPBadGateway
-    with pytest.raises(web.HTTPBadGateway):
-        await proxy._handle_proxy_request(mock_request)
-
-
-@pytest.mark.asyncio
-async def test_handle_proxy_request_unexpected_error(populated_store: TrackStore) -> None:
-    """Test unexpected error handling in _handle_proxy_request."""
-    # Add track to store
-    populated_store.add_track(
-        video_id="test_video3",
-        stream_url="https://youtube.com/stream/test3",
-        title="Test Video 3",
-        artist="Test Artist"
-    )
-
-    mock_request = Mock(spec=web.Request)
-    mock_request.remote = "127.0.0.1"
-    mock_request.match_info = {"video_id": "test_video3"}
-
-    proxy = ICYProxyServer(populated_store, host="localhost", port=8888)
-
-    # Mock _proxy_stream to raise unexpected error
-    proxy._proxy_stream = AsyncMock(side_effect=RuntimeError("Unexpected"))
-
-    # Should convert to HTTPInternalServerError
-    with pytest.raises(web.HTTPInternalServerError):
-        await proxy._handle_proxy_request(mock_request)
-
-
-@pytest.mark.asyncio
-async def test_proxy_stream_retry_logic_with_transient_errors() -> None:
-    """Test retry logic with exponential backoff for transient errors."""
-    import asyncio
-    from aiohttp import ClientError
-
-    track_store = TrackStore(":memory:")
-    track_store.add_track(
-        video_id="retry_test",
-        stream_url="https://youtube.com/stream/retry",
-        title="Test",
-        artist="Artist"
-    )
-
-    proxy = ICYProxyServer(track_store, host="localhost", port=8888)
-    mock_request = Mock(spec=web.Request)
-
-    # Mock _fetch_and_stream to fail twice, then succeed
-    call_count = 0
-    success_response = Mock(spec=web.StreamResponse)
-
-    async def mock_fetch_and_stream(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count < 3:
-            raise ClientError("Transient error")
-        return success_response
-
-    proxy._fetch_and_stream = mock_fetch_and_stream
-
-    # Should succeed after retries
-    response = await proxy._proxy_stream(
-        mock_request,
-        "https://youtube.com/stream/retry",
-        "Artist - Test",
-        "retry_test"
-    )
-
-    assert response is success_response
-    assert call_count == 3  # Failed twice, succeeded on third attempt
-
-    track_store.close()
-
-
-@pytest.mark.asyncio
-async def test_proxy_stream_permanent_error_no_retry() -> None:
-    """Test that permanent HTTP errors (403/404/410) are not retried."""
-    from aiohttp import ClientResponseError
-
-    track_store = TrackStore(":memory:")
-    proxy = ICYProxyServer(track_store, host="localhost", port=8888)
-    mock_request = Mock(spec=web.Request)
-
-    # Mock _fetch_and_stream to raise 404
-    async def mock_fetch_404(*args, **kwargs):
-        raise ClientResponseError(
-            request_info=Mock(),
-            history=(),
-            status=404,
-            message="Not found"
-        )
-
-    proxy._fetch_and_stream = mock_fetch_404
-
-    # Should fail immediately without retries
-    from ytmpd.exceptions import YouTubeStreamError
-    with pytest.raises(YouTubeStreamError, match="YouTube returned 404"):
-        await proxy._proxy_stream(
-            mock_request,
-            "https://youtube.com/stream/notfound",
-            "Artist - Test",
-            "notfound"
-        )
-
-    track_store.close()
-
-
-@pytest.mark.asyncio
-async def test_proxy_stream_exhausted_retries() -> None:
-    """Test that after max retries, YouTubeStreamError is raised."""
-    import asyncio
-
-    track_store = TrackStore(":memory:")
-    proxy = ICYProxyServer(track_store, host="localhost", port=8888)
-    mock_request = Mock(spec=web.Request)
-
-    # Mock _fetch_and_stream to always fail
-    async def mock_fetch_fail(*args, **kwargs):
-        raise asyncio.TimeoutError("Always timeout")
-
-    proxy._fetch_and_stream = mock_fetch_fail
-
-    # Should fail after max retries
-    from ytmpd.exceptions import YouTubeStreamError
-    with pytest.raises(YouTubeStreamError, match="Failed to fetch stream after 3 attempts"):
-        await proxy._proxy_stream(
-            mock_request,
-            "https://youtube.com/stream/fail",
-            "Artist - Test",
-            "fail_test",
-            max_retries=3
-        )
-
-    track_store.close()
-
-
-@pytest.mark.asyncio
-async def test_fetch_and_stream_success() -> None:
-    """Test successful stream fetch and proxying with ICY headers."""
-    import aiohttp
-    from aiohttp.test_utils import make_mocked_request
-
-    track_store = TrackStore(":memory:")
-    proxy = ICYProxyServer(track_store, host="localhost", port=8888)
-
-    # Create real request object
-    request = make_mocked_request("GET", "/proxy/test")
-
-    # Mock aiohttp session and response
-    mock_youtube_response = AsyncMock()
-    mock_youtube_response.status = 200
-    mock_youtube_response.headers = {"Content-Type": "audio/mpeg"}
-    mock_youtube_response.content = MockStreamContent([b"audio_chunk_1", b"audio_chunk_2"])
-    mock_youtube_response.request_info = Mock()
-    mock_youtube_response.__aenter__ = AsyncMock(return_value=mock_youtube_response)
-    mock_youtube_response.__aexit__ = AsyncMock(return_value=None)
-
-    mock_session = AsyncMock()
-    mock_session.get = Mock(return_value=mock_youtube_response)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("ytmpd.icy_proxy.aiohttp.ClientSession", return_value=mock_session):
-        response = await proxy._fetch_and_stream(
-            request,
-            "https://youtube.com/stream/test",
-            "Artist - Title",
-            "test_video"
-        )
-
-    # Verify response has ICY headers
-    assert response.status == 200
-    assert response.headers.get("icy-name") == "Artist - Title"
-    assert response.headers.get("Content-Type") == "audio/mpeg"
-    assert "icy-metaint" in response.headers
-
-    track_store.close()
-
-
-@pytest.mark.asyncio
-async def test_fetch_and_stream_youtube_error_status() -> None:
-    """Test _fetch_and_stream with non-200 YouTube response."""
-    import aiohttp
-    from aiohttp.test_utils import make_mocked_request
-
-    track_store = TrackStore(":memory:")
-    proxy = ICYProxyServer(track_store, host="localhost", port=8888)
-
-    request = make_mocked_request("GET", "/proxy/test")
-
-    # Mock YouTube response with 403 status
-    mock_youtube_response = AsyncMock()
-    mock_youtube_response.status = 403
-    mock_youtube_response.request_info = Mock()
-    mock_youtube_response.__aenter__ = AsyncMock(return_value=mock_youtube_response)
-    mock_youtube_response.__aexit__ = AsyncMock(return_value=None)
-
-    mock_session = AsyncMock()
-    mock_session.get = Mock(return_value=mock_youtube_response)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("ytmpd.icy_proxy.aiohttp.ClientSession", return_value=mock_session):
-        with pytest.raises(aiohttp.ClientResponseError) as exc_info:
-            await proxy._fetch_and_stream(
-                request,
-                "https://youtube.com/stream/forbidden",
-                "Artist - Title",
-                "test_video"
-            )
-        assert exc_info.value.status == 403
-
-    track_store.close()
-
-
-@pytest.mark.asyncio
-async def test_fetch_and_stream_client_disconnect() -> None:
-    """Test handling of client disconnect during streaming."""
-    import aiohttp
-    from aiohttp.test_utils import make_mocked_request
-
-    track_store = TrackStore(":memory:")
-    proxy = ICYProxyServer(track_store, host="localhost", port=8888)
-
-    request = make_mocked_request("GET", "/proxy/test")
-
-    # Mock stream that raises ConnectionResetError
-    class DisconnectMockStreamContent:
-        async def iter_chunked(self, chunk_size: int):
-            yield b"chunk1"
-            raise ConnectionResetError("Client disconnected")
-
-    mock_youtube_response = AsyncMock()
-    mock_youtube_response.status = 200
-    mock_youtube_response.headers = {"Content-Type": "audio/mpeg"}
-    mock_youtube_response.content = DisconnectMockStreamContent()
-    mock_youtube_response.request_info = Mock()
-    mock_youtube_response.__aenter__ = AsyncMock(return_value=mock_youtube_response)
-    mock_youtube_response.__aexit__ = AsyncMock(return_value=None)
-
-    mock_session = AsyncMock()
-    mock_session.get = Mock(return_value=mock_youtube_response)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=None)
-
-    with patch("ytmpd.icy_proxy.aiohttp.ClientSession", return_value=mock_session):
-        # Should handle disconnect gracefully and return response
-        response = await proxy._fetch_and_stream(
-            request,
-            "https://youtube.com/stream/test",
-            "Artist - Title",
-            "test_video"
-        )
-        assert response.status == 200
-
-    track_store.close()
