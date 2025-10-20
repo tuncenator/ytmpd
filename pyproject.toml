@@ -1,6 +1,6 @@
 [project]
 name = "ytmpd"
-version = "1.0.0"
+version = "1.1.1"
 description = "YouTube Music MPD - An MPD/MPC-like daemon and client for YouTube Music"
 authors = [
     {name = "Tunç Yıldırım", email = "tuncenator@gmail.com"}
