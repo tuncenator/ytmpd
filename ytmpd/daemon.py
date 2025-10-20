@@ -608,27 +608,142 @@ class YTMPDaemon:
 
         return True, None
 
+    def _extract_video_id_from_url(self, url: str) -> str | None:
+        """Extract YouTube video ID from proxy URL.
+
+        Proxy URLs follow pattern: http://localhost:PORT/proxy/VIDEO_ID
+
+        Args:
+            url: URL to extract video ID from.
+
+        Returns:
+            11-character video ID or None if not a proxy URL.
+        """
+        if not url:
+            return None
+
+        # Match pattern: */proxy/{video_id}
+        import re
+        match = re.search(r'/proxy/([A-Za-z0-9_-]{11})$', url)
+        return match.group(1) if match else None
+
     def _cmd_radio(self, video_id: str | None) -> dict[str, Any]:
-        """Handle 'radio' command - generate radio playlist (stub).
+        """Handle 'radio' command - generate radio playlist.
 
         Args:
             video_id: YouTube video ID, or None to use current track.
 
         Returns:
-            Response dict with success status.
+            Response dict with success status and track count.
         """
         logger.info(f"Radio command received: video_id={video_id}")
 
-        # Validate video_id if provided
-        if video_id is not None:
-            is_valid, error = self._validate_video_id(video_id)
-            if not is_valid:
-                return {"success": False, "error": error}
+        try:
+            # If no video_id provided, extract from current MPD track
+            if video_id is None:
+                try:
+                    current = self.mpd_client._client.currentsong()
+                except Exception as e:
+                    logger.error(f"Failed to get current song from MPD: {e}")
+                    return {"success": False, "error": "Failed to get current track"}
 
-        return {
-            "success": True,
-            "message": "Command received: radio (not yet implemented)",
-        }
+                if not current:
+                    return {"success": False, "error": "No track currently playing"}
+
+                # Extract video ID from proxy URL
+                file_url = current.get("file", "")
+                video_id = self._extract_video_id_from_url(file_url)
+
+                if not video_id:
+                    return {"success": False, "error": "Current track is not a YouTube track"}
+
+                logger.info(f"Extracted video ID from current track: {video_id}")
+            else:
+                # Validate provided video_id
+                is_valid, error = self._validate_video_id(video_id)
+                if not is_valid:
+                    return {"success": False, "error": error}
+
+            # Get radio playlist from YouTube Music
+            logger.info(f"Fetching radio playlist for video ID: {video_id}")
+            radio_tracks = self.ytmusic_client._client.get_watch_playlist(
+                videoId=video_id,
+                radio=True,
+                limit=self.config.get("radio_playlist_limit", 25)
+            )
+
+            if not radio_tracks:
+                return {"success": False, "error": "Failed to generate radio playlist"}
+
+            # Extract video IDs from radio tracks
+            # get_watch_playlist returns a dict with "tracks" key
+            tracks = radio_tracks.get("tracks", []) if isinstance(radio_tracks, dict) else radio_tracks
+            video_ids = []
+            for track in tracks:
+                if isinstance(track, dict) and "videoId" in track:
+                    video_ids.append(track["videoId"])
+
+            if not video_ids:
+                return {"success": False, "error": "No tracks found in radio playlist"}
+
+            logger.info(f"Fetched {len(video_ids)} tracks from radio playlist")
+
+            # Resolve stream URLs
+            logger.info(f"Resolving stream URLs for {len(video_ids)} tracks")
+            resolved = self.stream_resolver.resolve_batch(video_ids)
+
+            if not resolved:
+                return {"success": False, "error": "Failed to resolve any stream URLs"}
+
+            logger.info(f"Resolved {len(resolved)} of {len(video_ids)} tracks")
+
+            # Build TrackWithMetadata objects for playlist creation
+            from ytmpd.mpd_client import TrackWithMetadata
+            track_objects = []
+            for track in tracks:
+                if isinstance(track, dict):
+                    vid = track.get("videoId")
+                    if vid and vid in resolved:
+                        # Extract artist info
+                        artists = track.get("artists", [])
+                        if isinstance(artists, list) and artists:
+                            artist = ", ".join([a.get("name", "") for a in artists if isinstance(a, dict) and a.get("name")])
+                        else:
+                            artist = "Unknown Artist"
+
+                        track_objects.append(TrackWithMetadata(
+                            url=resolved[vid],
+                            title=track.get("title", "Unknown Title"),
+                            artist=artist,
+                            video_id=vid,
+                            duration_seconds=track.get("duration_seconds")
+                        ))
+
+            if not track_objects:
+                return {"success": False, "error": "No valid tracks to add to playlist"}
+
+            # Create MPD playlist
+            playlist_name = "YT: Radio"
+            logger.info(f"Creating playlist '{playlist_name}' with {len(track_objects)} tracks")
+            self.mpd_client.create_or_replace_playlist(
+                name=playlist_name,
+                tracks=track_objects,
+                proxy_config=self.proxy_config,
+                playlist_format=self.config.get("playlist_format", "m3u"),
+                mpd_music_directory=self.config.get("mpd_music_directory")
+            )
+
+            logger.info(f"Radio playlist created successfully: {len(track_objects)} tracks")
+            return {
+                "success": True,
+                "message": f"Radio playlist created: {len(track_objects)} tracks",
+                "tracks": len(track_objects),
+                "playlist": playlist_name
+            }
+
+        except Exception as e:
+            logger.error(f"Radio generation failed: {e}")
+            return {"success": False, "error": f"Radio generation failed: {str(e)}"}
 
     def _cmd_search(self, query: str | None) -> dict[str, Any]:
         """Handle 'search' command - search YouTube Music (stub).

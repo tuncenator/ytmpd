@@ -637,85 +637,9 @@ class TestSignalHandling:
 class TestDaemonRadioSearchCommands:
     """Tests for new radio and search commands (Phase 2 stubs)."""
 
-    def test_cmd_radio_stub_with_video_id(
-        self,
-        mock_get_config_dir,
-        mock_load_config,
-        mock_sync_engine,
-        mock_resolver,
-        mock_mpd,
-        mock_ytmusic,
-        tmp_path,
-    ):
-        """Test that 'radio' command with video ID returns stub response."""
-        # Setup mocks
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        (config_dir / "browser.json").touch()
-        mock_get_config_dir.return_value = config_dir
-
-        mock_load_config.return_value = {
-            "mpd_socket_path": "/tmp/mpd.sock",
-            "stream_cache_hours": 5,
-            "playlist_prefix": "YT: ",
-            "sync_interval_minutes": 30,
-            "enable_auto_sync": True,
-            "proxy_enabled": True,
-            "proxy_host": "localhost",
-            "proxy_port": 8080,
-            "proxy_track_mapping_db": "/tmp/track_mapping.db",
-            "radio_playlist_limit": 25,
-        }
-
-        # Create daemon
-        daemon = YTMPDaemon()
-
-        # Call radio command with valid video ID
-        response = daemon._cmd_radio("2xOPkdtFeHM")
-
-        # Verify response
-        assert response["success"] is True
-        assert "not yet implemented" in response["message"]
-
-    def test_cmd_radio_stub_without_video_id(
-        self,
-        mock_get_config_dir,
-        mock_load_config,
-        mock_sync_engine,
-        mock_resolver,
-        mock_mpd,
-        mock_ytmusic,
-        tmp_path,
-    ):
-        """Test that 'radio' command without video ID returns stub response."""
-        # Setup mocks
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        (config_dir / "browser.json").touch()
-        mock_get_config_dir.return_value = config_dir
-
-        mock_load_config.return_value = {
-            "mpd_socket_path": "/tmp/mpd.sock",
-            "stream_cache_hours": 5,
-            "playlist_prefix": "YT: ",
-            "sync_interval_minutes": 30,
-            "enable_auto_sync": True,
-            "proxy_enabled": True,
-            "proxy_host": "localhost",
-            "proxy_port": 8080,
-            "proxy_track_mapping_db": "/tmp/track_mapping.db",
-            "radio_playlist_limit": 25,
-        }
-
-        # Create daemon
-        daemon = YTMPDaemon()
-
-        # Call radio command without video ID
-        response = daemon._cmd_radio(None)
-
-        # Verify response
-        assert response["success"] is True
-        assert "not yet implemented" in response["message"]
+    # ========== Phase 2: Stub tests (removed - replaced by Phase 3 full implementation tests) ==========
+    # test_cmd_radio_stub_with_video_id - REMOVED (Phase 3 implements full feature)
+    # test_cmd_radio_stub_without_video_id - REMOVED (Phase 3 implements full feature)
 
     def test_cmd_radio_invalid_video_id_short(
         self,
@@ -1116,3 +1040,277 @@ class TestDaemonRadioSearchCommands:
         # Verify error response
         assert response["success"] is False
         assert "Invalid video ID format" in response["error"]
+
+    # ========== Phase 3: Radio Feature Tests ==========
+
+    def test_extract_video_id_from_proxy_url(
+        self,
+        mock_get_config_dir,
+        mock_ytmusic_client,
+        mock_mpd_client,
+        mock_stream_resolver,
+        mock_signal,
+        monkeypatch,
+    ):
+        """Test extracting video ID from proxy URL."""
+        from ytmpd.daemon import YTMPDaemon
+
+        # Mock configuration
+        monkeypatch.setattr(
+            "ytmpd.daemon.load_config",
+            lambda: {
+                "mpd_socket_path": "~/.config/mpd/socket",
+                "playlist_prefix": "YT: ",
+                "sync_interval_minutes": 30,
+                "enable_auto_sync": True,
+                "proxy_enabled": True,
+                "proxy_host": "localhost",
+                "proxy_port": 6602,
+                "proxy_track_mapping_db": "/tmp/track_mapping.db",
+                "radio_playlist_limit": 25,
+            },
+        )
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Test valid proxy URL
+        url = "http://localhost:6602/proxy/2xOPkdtFeHM"
+        video_id = daemon._extract_video_id_from_url(url)
+        assert video_id == "2xOPkdtFeHM"
+
+        # Test another valid URL
+        url2 = "http://localhost:6602/proxy/dQw4w9WgXcQ"
+        video_id2 = daemon._extract_video_id_from_url(url2)
+        assert video_id2 == "dQw4w9WgXcQ"
+
+    def test_extract_video_id_from_invalid_url(
+        self,
+        mock_get_config_dir,
+        mock_ytmusic_client,
+        mock_mpd_client,
+        mock_stream_resolver,
+        mock_signal,
+        monkeypatch,
+    ):
+        """Test extracting video ID from non-proxy URLs returns None."""
+        from ytmpd.daemon import YTMPDaemon
+
+        # Mock configuration
+        monkeypatch.setattr(
+            "ytmpd.daemon.load_config",
+            lambda: {
+                "mpd_socket_path": "~/.config/mpd/socket",
+                "playlist_prefix": "YT: ",
+                "sync_interval_minutes": 30,
+                "enable_auto_sync": True,
+                "proxy_enabled": True,
+                "proxy_host": "localhost",
+                "proxy_port": 6602,
+                "proxy_track_mapping_db": "/tmp/track_mapping.db",
+                "radio_playlist_limit": 25,
+            },
+        )
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Test empty URL
+        assert daemon._extract_video_id_from_url("") is None
+
+        # Test None URL
+        assert daemon._extract_video_id_from_url(None) is None
+
+        # Test non-proxy URL
+        assert daemon._extract_video_id_from_url("http://example.com/video") is None
+
+        # Test regular file path
+        assert daemon._extract_video_id_from_url("/path/to/file.mp3") is None
+
+        # Test URL with wrong video ID length
+        assert daemon._extract_video_id_from_url("http://localhost:6602/proxy/short") is None
+
+    def test_cmd_radio_no_current_track(
+        self,
+        mock_get_config_dir,
+        mock_ytmusic_client,
+        mock_mpd_client,
+        mock_stream_resolver,
+        mock_signal,
+        monkeypatch,
+    ):
+        """Test radio command when no track is playing."""
+        from ytmpd.daemon import YTMPDaemon
+        from unittest.mock import Mock
+
+        # Mock configuration
+        monkeypatch.setattr(
+            "ytmpd.daemon.load_config",
+            lambda: {
+                "mpd_socket_path": "~/.config/mpd/socket",
+                "playlist_prefix": "YT: ",
+                "sync_interval_minutes": 30,
+                "enable_auto_sync": True,
+                "proxy_enabled": True,
+                "proxy_host": "localhost",
+                "proxy_port": 6602,
+                "proxy_track_mapping_db": "/tmp/track_mapping.db",
+                "radio_playlist_limit": 25,
+            },
+        )
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Mock MPD client to return empty current song
+        daemon.mpd_client._client = Mock()
+        daemon.mpd_client._client.currentsong.return_value = None
+
+        # Call radio command
+        response = daemon._cmd_radio(None)
+
+        # Verify error response
+        assert response["success"] is False
+        assert "No track currently playing" in response["error"]
+
+    def test_cmd_radio_non_youtube_track(
+        self,
+        mock_get_config_dir,
+        mock_ytmusic_client,
+        mock_mpd_client,
+        mock_stream_resolver,
+        mock_signal,
+        monkeypatch,
+    ):
+        """Test radio command when current track is not a YouTube track."""
+        from ytmpd.daemon import YTMPDaemon
+        from unittest.mock import Mock
+
+        # Mock configuration
+        monkeypatch.setattr(
+            "ytmpd.daemon.load_config",
+            lambda: {
+                "mpd_socket_path": "~/.config/mpd/socket",
+                "playlist_prefix": "YT: ",
+                "sync_interval_minutes": 30,
+                "enable_auto_sync": True,
+                "proxy_enabled": True,
+                "proxy_host": "localhost",
+                "proxy_port": 6602,
+                "proxy_track_mapping_db": "/tmp/track_mapping.db",
+                "radio_playlist_limit": 25,
+            },
+        )
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Mock MPD client to return non-YouTube track
+        daemon.mpd_client._client = Mock()
+        daemon.mpd_client._client.currentsong.return_value = {
+            "file": "/path/to/local/file.mp3",
+            "title": "Local Track"
+        }
+
+        # Call radio command
+        response = daemon._cmd_radio(None)
+
+        # Verify error response
+        assert response["success"] is False
+        assert "not a YouTube track" in response["error"]
+
+    def test_cmd_radio_success(
+        self,
+        mock_get_config_dir,
+        mock_load_config,
+        mock_sync_engine,
+        mock_resolver,
+        mock_mpd,
+        mock_ytmusic,
+        tmp_path,
+    ):
+        """Test successful radio playlist generation."""
+        from ytmpd.daemon import YTMPDaemon
+        from unittest.mock import Mock
+
+        # Setup mocks
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "browser.json").touch()
+        mock_get_config_dir.return_value = config_dir
+
+        mock_load_config.return_value = {
+            "mpd_socket_path": "/tmp/mpd.sock",
+            "stream_cache_hours": 5,
+            "playlist_prefix": "YT: ",
+            "sync_interval_minutes": 30,
+            "enable_auto_sync": True,
+            "proxy_enabled": True,
+            "proxy_host": "localhost",
+            "proxy_port": 6602,
+            "proxy_track_mapping_db": "/tmp/track_mapping.db",
+            "radio_playlist_limit": 25,
+        }
+
+        # Create daemon
+        daemon = YTMPDaemon()
+
+        # Mock MPD client to return YouTube track
+        daemon.mpd_client._client = Mock()
+        daemon.mpd_client._client.currentsong.return_value = {
+            "file": "http://localhost:6602/proxy/2xOPkdtFeHM",
+            "title": "Test Track"
+        }
+
+        # Mock YTMusic client's get_watch_playlist
+        daemon.ytmusic_client._client = Mock()
+        daemon.ytmusic_client._client.get_watch_playlist.return_value = {
+            "tracks": [
+                {
+                    "videoId": "abc12345678",
+                    "title": "Radio Track 1",
+                    "artists": [{"name": "Artist 1"}],
+                    "duration_seconds": 180
+                },
+                {
+                    "videoId": "def12345678",
+                    "title": "Radio Track 2",
+                    "artists": [{"name": "Artist 2"}],
+                    "duration_seconds": 200
+                },
+            ]
+        }
+
+        # Mock stream resolver
+        daemon.stream_resolver.resolve_batch = Mock(return_value={
+            "abc12345678": "http://stream1.url",
+            "def12345678": "http://stream2.url",
+        })
+
+        # Mock MPD client's create_or_replace_playlist
+        daemon.mpd_client.create_or_replace_playlist = Mock()
+
+        # Call radio command
+        response = daemon._cmd_radio(None)
+
+        # Verify success response
+        assert response["success"] is True
+        assert response["tracks"] == 2
+        assert response["playlist"] == "YT: Radio"
+        assert "2 tracks" in response["message"]
+
+        # Verify get_watch_playlist was called with correct params
+        daemon.ytmusic_client._client.get_watch_playlist.assert_called_once_with(
+            videoId="2xOPkdtFeHM",
+            radio=True,
+            limit=25
+        )
+
+        # Verify resolve_batch was called
+        daemon.stream_resolver.resolve_batch.assert_called_once()
+
+        # Verify playlist was created
+        daemon.mpd_client.create_or_replace_playlist.assert_called_once()
+        call_args = daemon.mpd_client.create_or_replace_playlist.call_args
+        assert call_args[1]["name"] == "YT: Radio"
+        assert len(call_args[1]["tracks"]) == 2

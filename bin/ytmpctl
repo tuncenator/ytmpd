@@ -260,6 +260,29 @@ def cmd_list_playlists() -> None:
     print(colorize('  mpc load "YT: <playlist-name>"', "blue"))
 
 
+def cmd_radio() -> None:
+    """Generate radio playlist from currently playing track."""
+    print("Generating radio playlist from current track...")
+    result = send_command("radio")
+
+    if result.get("success"):
+        check = "✓" if has_unicode_support() else "OK"
+        tracks = result.get("tracks", 0)
+        playlist = result.get("playlist", "YT: Radio")
+        msg = f"Radio playlist created: {tracks} tracks"
+        print(colorize(f"{check} {msg}", "green"))
+        print()
+        print(f"Playlist '{playlist}' is ready in MPD.")
+        print("To load and play:")
+        print(colorize(f'  mpc load "{playlist}"', "blue"))
+        print(colorize("  mpc play", "blue"))
+    else:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        error = result.get("error", "Unknown error")
+        print(colorize(f"{cross} {error}", "red"), file=sys.stderr)
+        sys.exit(1)
+
+
 def show_help() -> None:
     """Display help message."""
     help_text = f"""{colorize("ytmpctl", "bold")} - YouTube Music to MPD sync control
@@ -268,6 +291,7 @@ def show_help() -> None:
   ytmpctl sync              Trigger immediate sync
   ytmpctl status            Show sync status and statistics
   ytmpctl list-playlists    List YouTube Music playlists
+  ytmpctl radio             Generate radio playlist from current track
   ytmpctl help              Show this help message
 
 {colorize("Playback Control:", "bold")}
@@ -329,6 +353,8 @@ def main() -> NoReturn:
         cmd_status()
     elif command == "list-playlists" or command == "list":
         cmd_list_playlists()
+    elif command == "radio":
+        cmd_radio()
     elif command == "help" or command == "--help" or command == "-h":
         show_help()
     else:
