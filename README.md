@@ -455,7 +455,7 @@ See `examples/i3-config` for a complete example.
 
 ### i3blocks Status Display
 
-The `ytmpd-status` script now shows MPD playback status.
+The `ytmpd-status` script shows MPD playback status with intelligent truncation that protects critical information.
 
 **Add to your i3blocks config** (`~/.config/i3blocks/config`):
 
@@ -477,7 +477,12 @@ The status block will display:
 - `⏸ The Beatles - Hey Jude [1:23/7:06]` (yellow) when paused
 - `⏹ MPD` (gray) when stopped
 
-See `examples/i3blocks-config` for a complete example.
+**Adaptive truncation:** When display width is constrained, the status script intelligently truncates while protecting essential information:
+- Timestamps (current/end time) are never truncated
+- Progress bar shrinks adaptively or hides if needed
+- Song name truncates with ellipsis as last resort
+
+See `examples/i3blocks-config` for a complete example and advanced configuration options.
 
 ## Configuration
 
