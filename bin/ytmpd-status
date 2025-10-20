@@ -30,8 +30,10 @@ Color Codes (for i3blocks):
 import argparse
 import os
 import re
+import signal
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 from mpd import MPDClient, ConnectionError as MPDConnectionError
@@ -615,6 +617,19 @@ Examples:
         help="Verbose output (show connection info, etc.)",
     )
 
+    # i3blocks integration options
+    i3blocks_group = parser.add_argument_group("i3blocks Integration Options")
+    i3blocks_group.add_argument(
+        "--idle",
+        action="store_true",
+        help="Run in idle mode (monitor MPD for changes, minimal CPU usage)",
+    )
+    i3blocks_group.add_argument(
+        "--handle-clicks",
+        action="store_true",
+        help="Handle i3blocks click events (via BLOCK_BUTTON env var)",
+    )
+
     args = parser.parse_args()
 
     # Handle show_bar default (backward compatibility)
@@ -653,10 +668,377 @@ def format_with_template(template: str, data: dict) -> str:
     return output
 
 
+# Global flag for signal handling
+should_refresh = False
+should_exit = False
+
+
+def signal_handler_refresh(signum, frame):
+    """Handle SIGUSR1 signal to trigger immediate refresh."""
+    global should_refresh
+    should_refresh = True
+
+
+def signal_handler_exit(signum, frame):
+    """Handle SIGTERM/SIGINT signals for graceful shutdown."""
+    global should_exit
+    should_exit = True
+
+
+def handle_click(client: MPDClient, verbose: bool = False) -> bool:
+    """Handle i3blocks click events via BLOCK_BUTTON environment variable.
+
+    Args:
+        client: Connected MPD client.
+        verbose: Print debug information.
+
+    Returns:
+        True if a click was handled, False otherwise.
+    """
+    button = os.environ.get("BLOCK_BUTTON", "")
+
+    if not button:
+        return False
+
+    if verbose:
+        print(f"Handling click: button {button}", file=sys.stderr)
+
+    try:
+        if button == "1":  # Left click: toggle play/pause
+            status = client.status()
+            state = status.get("state", "stop")
+            if state == "play":
+                client.pause(1)
+            elif state == "pause":
+                client.pause(0)
+            elif state == "stop":
+                client.play()
+            return True
+        elif button == "2":  # Middle click: stop
+            client.stop()
+            return True
+        elif button == "3":  # Right click: could show more info (reserved)
+            return False
+        elif button == "4":  # Scroll up: next track
+            client.next()
+            return True
+        elif button == "5":  # Scroll down: previous track
+            client.previous()
+            return True
+        else:
+            return False
+
+    except Exception as e:
+        if verbose:
+            print(f"Error handling click: {e}", file=sys.stderr)
+        return False
+
+
+def display_status(client: MPDClient, args) -> None:
+    """Display current MPD status once.
+
+    Args:
+        client: Connected MPD client.
+        args: Parsed command-line arguments.
+    """
+    try:
+        # Get current status and song
+        status = client.status()
+        current_song = client.currentsong()
+
+        state = status.get("state", "stop")
+
+        if state == "stop" or not current_song:
+            stop_icon = args.icon_stopped
+            stop_color = args.color_stopped
+            print(f"{stop_icon} Stopped")
+            print(f"{stop_icon} Stopped")  # Short text
+            print(stop_color)
+            return
+
+        # Get song info
+        title = current_song.get("title", "Unknown")
+        artist = current_song.get("artist", "Unknown")
+        file_path = current_song.get("file", "")
+
+        # Get timing info
+        elapsed = status.get("elapsed", "0")
+        duration = status.get("duration", current_song.get("time", "0"))
+
+        # Format time
+        position_str = format_time(elapsed)
+        duration_str = format_time(duration)
+
+        # Classify track type
+        track_type = get_track_type(file_path)
+
+        # Choose icon and color based on state and track type
+        if state == "play":
+            icon = args.icon_playing
+            if track_type == "youtube":
+                color = args.color_youtube_playing
+            else:
+                color = args.color_local_playing
+        elif state == "pause":
+            icon = args.icon_paused
+            if track_type == "youtube":
+                color = args.color_youtube_paused
+            else:
+                color = args.color_local_paused
+        else:
+            icon = args.icon_stopped
+            color = args.color_stopped
+
+        # Get playlist context
+        playlist_ctx = get_playlist_context(client)
+
+        # Check sync status for YouTube tracks
+        sync_status = get_sync_status(file_path)
+
+        # Build output (same logic as main())
+        max_length = args.max_length
+        bar_length = args.bar_length
+        show_bar = args.show_bar
+        bar_style = args.bar_style
+        show_next = args.show_next
+        show_prev = args.show_prev
+        compact_mode = args.compact
+        custom_format = args.format
+
+        # Check if using custom format string
+        if custom_format:
+            # Build progress bar if needed in format
+            progress_bar_str = ""
+            if "{bar}" in custom_format and show_bar:
+                try:
+                    elapsed_float = float(elapsed)
+                    duration_float = float(duration)
+                    if duration_float > 0:
+                        progress_bar_str = render_progress_bar(
+                            elapsed_float, duration_float, bar_length, bar_style, track_type
+                        )
+                except (ValueError, TypeError):
+                    pass
+
+            # Build template data
+            template_data = {
+                "icon": icon,
+                "artist": artist,
+                "title": title,
+                "album": current_song.get("album", ""),
+                "elapsed": position_str,
+                "duration": duration_str,
+                "bar": progress_bar_str,
+                "position": playlist_ctx.get("position", ""),
+                "total": playlist_ctx.get("total", ""),
+                "next": (
+                    f"{playlist_ctx['next']['artist']} - {playlist_ctx['next']['title']}"
+                    if playlist_ctx.get("next")
+                    else ""
+                ),
+                "prev": (
+                    f"{playlist_ctx['prev']['artist']} - {playlist_ctx['prev']['title']}"
+                    if playlist_ctx.get("prev")
+                    else ""
+                ),
+            }
+
+            # Format with template
+            output = format_with_template(custom_format, template_data)
+        else:
+            # Default format logic
+            if compact_mode:
+                output = f"{icon} {artist} - {title}"
+            else:
+                # Build base output
+                output = f"{icon} {artist} - {title}"
+
+                # Add progress bar if enabled
+                if show_bar:
+                    try:
+                        elapsed_float = float(elapsed)
+                        duration_float = float(duration)
+                        if duration_float > 0:
+                            progress_bar_str = render_progress_bar(
+                                elapsed_float, duration_float, bar_length, bar_style, track_type
+                            )
+                            output += f" {progress_bar_str}"
+                    except (ValueError, TypeError):
+                        pass
+
+                # Add time info
+                output += f" {position_str}/{duration_str}]"
+
+                # Add playlist position if relevant
+                if playlist_ctx.get("position") and playlist_ctx.get("total"):
+                    pos = playlist_ctx["position"]
+                    total = playlist_ctx["total"]
+                    # Show position for first, last, or single-track playlists
+                    if pos == 1 or pos == total or total == 1:
+                        output += f" [{pos}/{total}]"
+
+                # Check for unresolved YouTube track
+                if track_type == "youtube" and sync_status == "unresolved":
+                    output += " [Resolving...]"
+
+        # Truncate if needed (use smart truncation)
+        output = smart_truncate(output, max_length)
+
+        # Build additional lines for next/previous tracks if enabled
+        additional_lines = []
+
+        if show_prev and playlist_ctx["prev"] is not None:
+            prev = playlist_ctx["prev"]
+            prev_line = f"↑ {prev['artist']} - {prev['title']}"
+            prev_line = smart_truncate(prev_line, max_length)
+            additional_lines.append(prev_line)
+
+        if show_next and playlist_ctx["next"] is not None:
+            next_track = playlist_ctx["next"]
+            next_line = f"↓ {next_track['artist']} - {next_track['title']}"
+            next_line = smart_truncate(next_line, max_length)
+            additional_lines.append(next_line)
+
+        # Output for i3blocks
+        # If we have additional lines, append them to the full text
+        if additional_lines:
+            full_output = output + "\n" + "\n".join(additional_lines)
+        else:
+            full_output = output
+
+        print(full_output)  # Full text (may include next/prev)
+        print(output)  # Short text (just main line)
+        print(color)  # Color
+
+    except Exception as e:
+        # Unexpected error
+        stop_icon = args.icon_stopped
+        stop_color = args.color_stopped
+        print(f"{stop_icon} Error: {e}")
+        print(f"{stop_icon} Error")
+        print(stop_color)
+
+
+def run_idle_mode(args) -> None:
+    """Run in idle mode, monitoring MPD for changes.
+
+    Args:
+        args: Parsed command-line arguments.
+    """
+    global should_refresh, should_exit
+
+    # Set up signal handlers
+    signal.signal(signal.SIGUSR1, signal_handler_refresh)
+    signal.signal(signal.SIGTERM, signal_handler_exit)
+    signal.signal(signal.SIGINT, signal_handler_exit)
+
+    if args.verbose:
+        print("Starting idle mode...", file=sys.stderr)
+
+    client = None
+    reconnect_delay = 1  # Start with 1 second delay
+
+    while not should_exit:
+        try:
+            # Connect if not connected
+            if client is None:
+                if args.verbose:
+                    print(f"Connecting to MPD at {args.host}:{args.port}...", file=sys.stderr)
+                client = get_mpd_client(host=args.host, port=args.port)
+
+                if client is None:
+                    if args.verbose:
+                        print(f"MPD not available, retrying in {reconnect_delay}s...", file=sys.stderr)
+                    time.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, 30)  # Exponential backoff, max 30s
+                    continue
+
+                # Reset reconnect delay on successful connection
+                reconnect_delay = 1
+
+            # Check for click events
+            if args.handle_clicks:
+                if handle_click(client, args.verbose):
+                    # Click handled, display updated status
+                    display_status(client, args)
+                    # Clear BLOCK_BUTTON to prevent re-handling
+                    os.environ.pop("BLOCK_BUTTON", None)
+                    continue
+
+            # Check if manual refresh requested
+            if should_refresh:
+                should_refresh = False
+                if args.verbose:
+                    print("Manual refresh triggered", file=sys.stderr)
+                display_status(client, args)
+                continue
+
+            # Display current status
+            display_status(client, args)
+
+            # Wait for MPD changes (this blocks until something changes)
+            if args.verbose:
+                print("Waiting for MPD changes...", file=sys.stderr)
+
+            # Use idle with timeout so we can check signals periodically
+            changed = client.idle(["player"])
+
+            if args.verbose:
+                print(f"MPD change detected: {changed}", file=sys.stderr)
+
+        except (MPDConnectionError, ConnectionRefusedError, OSError, BrokenPipeError) as e:
+            # Connection lost
+            if args.verbose:
+                print(f"MPD connection error: {e}", file=sys.stderr)
+
+            if client:
+                try:
+                    client.close()
+                except:
+                    pass
+                client = None
+
+            # Wait before reconnecting
+            if not should_exit:
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 30)
+
+        except Exception as e:
+            # Unexpected error
+            if args.verbose:
+                print(f"Unexpected error: {e}", file=sys.stderr)
+
+            # Try to recover
+            if client:
+                try:
+                    client.close()
+                except:
+                    pass
+                client = None
+
+            if not should_exit:
+                time.sleep(1)
+
+    # Cleanup on exit
+    if client:
+        try:
+            client.close()
+        except:
+            pass
+
+    if args.verbose:
+        print("Exiting idle mode", file=sys.stderr)
+
+
 def main() -> None:
     """Display MPD/ytmpd status for i3blocks."""
     # Parse arguments (with backward compatibility for env vars)
     args = parse_arguments()
+
+    # If idle mode requested, run that instead
+    if args.idle:
+        run_idle_mode(args)
+        return
 
     # Extract configuration from args
     max_length = args.max_length
@@ -682,6 +1064,12 @@ def main() -> None:
         print(f"{stop_icon} MPD stopped")  # Short text
         print(stop_color)
         sys.exit(0)
+
+    # Handle click events if requested (in polling mode)
+    if args.handle_clicks:
+        if handle_click(client, args.verbose):
+            # Click handled, continue to display updated status
+            pass
 
     try:
         # Get current status and song

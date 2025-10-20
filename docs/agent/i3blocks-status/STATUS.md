@@ -14,16 +14,16 @@
 ---
 
 **Last Updated:** 2025-10-20
-**Current Phase:** 6 of 7
-**Phase Name:** i3blocks Integration & Idle Mode
-**Progress:** 71% (5/7 phases complete)
+**Current Phase:** 7 of 7
+**Phase Name:** Testing, Scrolling & Polish
+**Progress:** 86% (6/7 phases complete)
 
 ---
 
 ## Progress Bar
 
 ```
-[██████████████░░░░░░] 71% (5/7)
+[████████████████░░░░] 86% (6/7)
 ```
 
 ---
@@ -37,34 +37,32 @@
 | 3 | Playlist Context & Sync Status | ✅ Complete |
 | 4 | Integration Testing | ✅ Complete |
 | 5 | CLI Arguments & Configuration | ✅ Complete |
-| 6 | i3blocks Integration & Idle Mode | 🔵 CURRENT |
-| 7 | Testing, Scrolling & Polish | ⏳ Pending |
+| 6 | i3blocks Integration & Idle Mode | ✅ Complete |
+| 7 | Testing, Scrolling & Polish | 🔵 CURRENT |
 
 ---
 
 ## Instructions for Agents
 
-### Current Phase: Phase 6
+### Current Phase: Phase 7
 
 1. **Verify location**: `pwd` → `/home/tunc/Sync/Programs/ytmpd`
 2. **Verify git branch**: `git branch` → `* feature/i3blocks-status`
 3. **Activate environment**: `source .venv/bin/activate`
-4. Read `PROJECT_PLAN.md` - Phase 6 section only
-5. Read Phase 5 summary: `summaries/PHASE_05_SUMMARY.md`
+4. Read `PROJECT_PLAN.md` - Phase 7 section only
+5. Read Phase 6 summary: `summaries/PHASE_06_SUMMARY.md`
 6. Complete the phase following the completion criteria
-7. Create `summaries/PHASE_06_SUMMARY.md`
+7. Create `summaries/PHASE_07_SUMMARY.md`
 8. Update this file:
-   - Mark Phase 6 as ✅ Complete
-   - Set Phase 7 as 🔵 CURRENT
-   - Update "Current Phase" to "7 of 7"
-   - Update "Phase Name" to "Testing, Scrolling & Polish"
-   - Update "Progress" to "86% (6/7 phases complete)"
-   - Update progress bar: `[████████████████░░░░] 86% (6/7)`
+   - Mark Phase 7 as ✅ Complete
+   - Update "Current Phase" to "7 of 7 (COMPLETE)"
+   - Update "Progress" to "100% (7/7 phases complete)"
+   - Update progress bar: `[████████████████████] 100% (7/7)`
 9. **Stage changes**: `git add -A && git status`
 10. **WAIT for user confirmation before committing**
 11. Commit with clean message (no AI/Claude references)
 
-**Full details:** See `PROJECT_PLAN.md` Phase 6
+**Full details:** See `PROJECT_PLAN.md` Phase 7
 
 ---
 
@@ -132,3 +130,15 @@
 - Manual testing verified CLI arguments, env var compatibility, and format strings
 - CLI args > env vars > defaults priority working correctly
 - Version bumped to 2.0.0
+
+**Phase 6 Completed:**
+- Implemented MPD idle mode using `client.idle(['player'])` for efficient monitoring (~0.1% CPU)
+- Added signal handling (SIGUSR1 for refresh, SIGTERM/SIGINT for shutdown)
+- Created click handler system for i3blocks (left/middle/scroll for play/pause/skip/stop)
+- Refactored display logic into `display_status()` function for code reuse
+- Built comprehensive examples/i3blocks.conf with 10+ configuration examples
+- Created detailed docs/i3blocks-integration.md with troubleshooting guide
+- Implemented exponential backoff reconnection (1s → 30s max)
+- Created 26 new unit tests for idle mode, signals, and click handlers
+- All 396 tests passing (370 from Phase 1-5 + 26 new)
+- Manual testing verified idle mode, signal handling, and click handlers work correctly
