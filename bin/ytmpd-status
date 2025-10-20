@@ -353,6 +353,158 @@ def smart_truncate(text: str, max_length: int) -> str:
         return f"{artist} - {truncated_title}"
 
 
+def adaptive_truncate_status(
+    icon: str,
+    artist: str,
+    title: str,
+    position_str: str,
+    duration_str: str,
+    progress_bar_str: str,
+    context_suffix: str,
+    max_length: int,
+    min_bar_length: int = 5,
+) -> str:
+    """Adaptively truncate status line with protected elements.
+
+    This function ensures that timestamps (position_str, duration_str) are NEVER
+    truncated, the progress bar can shrink to a minimum size, and the song name
+    (artist - title) is truncated as needed.
+
+    Priority (from highest to lowest):
+    1. Icon, brackets, timestamps - NEVER truncated
+    2. Progress bar - can shrink to min_bar_length (or be hidden entirely)
+    3. Song name - can be truncated with ellipsis
+
+    Args:
+        icon: Playback icon (▶, ⏸, ⏹).
+        artist: Artist name.
+        title: Song title.
+        position_str: Current time (e.g., "1:23").
+        duration_str: Total duration (e.g., "3:45").
+        progress_bar_str: Progress bar string (may be empty if disabled).
+        context_suffix: Additional context like "[Resolving...]" or position.
+        max_length: Maximum total output length.
+        min_bar_length: Minimum progress bar length before hiding it.
+
+    Returns:
+        Formatted and truncated status string.
+    """
+    ellipsis = "…"
+
+    # Calculate the length of protected elements (never truncate these)
+    # Format: "{icon} {artist} - {title} [{position_str} {bar} {duration_str}]{suffix}"
+    protected_base = (
+        len(icon)
+        + 1  # space after icon
+        + 1  # space before bracket
+        + 1  # opening bracket "["
+        + len(position_str)
+        + 1  # space after position
+        + 1  # space before duration
+        + len(duration_str)
+        + 1  # closing bracket "]"
+        + len(context_suffix)
+    )
+
+    # Calculate available space for song name and progress bar
+    available_space = max_length - protected_base
+
+    # Minimum viable song name (at least "A…")
+    min_song_length = 2
+
+    # If we can't even fit the bare minimum, just truncate everything
+    if available_space < min_song_length:
+        # Emergency fallback: just show what we can
+        result = f"{icon} {artist} - {title} [{position_str} {progress_bar_str} {duration_str}]{context_suffix}"
+        return result[: max_length - 1] + ellipsis if len(result) > max_length else result
+
+    # Try to fit: song name + full progress bar
+    song_name = f"{artist} - {title}"
+    full_output_length = len(song_name) + len(progress_bar_str)
+
+    if full_output_length <= available_space:
+        # Everything fits!
+        bar_part = f" {progress_bar_str}" if progress_bar_str else ""
+        return f"{icon} {song_name} [{position_str}{bar_part} {duration_str}]{context_suffix}"
+
+    # Need to make adjustments
+    current_bar_length = len(progress_bar_str)
+    bar_to_use = progress_bar_str
+
+    # Try shrinking the progress bar first
+    if current_bar_length > min_bar_length:
+        # Calculate how much we need to shrink
+        needed_space = full_output_length - available_space
+        new_bar_length = max(min_bar_length, current_bar_length - needed_space)
+
+        # Rebuild progress bar with new length
+        if progress_bar_str:
+            # Determine the bar style by checking the characters
+            if "█" in progress_bar_str or "░" in progress_bar_str:
+                style = "blocks"
+            elif "▰" in progress_bar_str or "▱" in progress_bar_str:
+                style = "smooth"
+            else:
+                style = "simple"
+
+            # Calculate filled ratio
+            if "█" in progress_bar_str:
+                filled = progress_bar_str.count("█")
+            elif "▰" in progress_bar_str:
+                filled = progress_bar_str.count("▰")
+            elif "#" in progress_bar_str:
+                filled = progress_bar_str.count("#")
+            else:
+                filled = 0
+
+            filled_ratio = filled / current_bar_length if current_bar_length > 0 else 0
+            new_filled = int(filled_ratio * new_bar_length)
+
+            bar_to_use = render_progress_bar(new_filled, new_bar_length, style)
+
+        # Recalculate with new bar
+        full_output_length = len(song_name) + len(bar_to_use)
+
+        if full_output_length <= available_space:
+            bar_part = f" {bar_to_use}" if bar_to_use else ""
+            return f"{icon} {song_name} [{position_str}{bar_part} {duration_str}]{context_suffix}"
+
+    # Still doesn't fit - try hiding the bar entirely
+    if full_output_length > available_space:
+        # Hide the bar and use all space for song name
+        available_for_song = available_space
+
+        if len(song_name) <= available_for_song:
+            # Fits without bar
+            return f"{icon} {song_name} [{position_str} {duration_str}]{context_suffix}"
+
+        # Need to truncate the song name
+        # Try to preserve artist name if possible
+        separator_pos = song_name.find(" - ")
+
+        if separator_pos != -1 and separator_pos < available_for_song - 5:
+            # Try to keep artist and truncate title
+            artist_part = song_name[:separator_pos]
+            title_part = song_name[separator_pos + 3 :]  # Skip " - "
+
+            # Calculate space for title
+            available_for_title = available_for_song - len(artist_part) - 3 - 1  # " - " + ellipsis
+
+            if available_for_title >= 2:
+                truncated_title = title_part[: available_for_title - 1] + ellipsis
+                truncated_song = f"{artist_part} - {truncated_title}"
+                return f"{icon} {truncated_song} [{position_str} {duration_str}]{context_suffix}"
+
+        # Artist name too long or no separator - truncate from end
+        truncated_song = song_name[: available_for_song - 1] + ellipsis
+        return f"{icon} {truncated_song} [{position_str} {duration_str}]{context_suffix}"
+
+    # Fallback (shouldn't reach here)
+    bar_part = f" {bar_to_use}" if bar_to_use else ""
+    result = f"{icon} {song_name} [{position_str}{bar_part} {duration_str}]{context_suffix}"
+    return result[: max_length - 1] + ellipsis if len(result) > max_length else result
+
+
 def validate_color(color: str) -> str:
     """Validate hex color format.
 
@@ -855,10 +1007,8 @@ def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
             if compact_mode:
                 output = f"{icon} {artist} - {title}"
             else:
-                # Build base output
-                output = f"{icon} {artist} - {title}"
-
-                # Add progress bar if enabled
+                # Build progress bar if enabled
+                progress_bar_str = ""
                 if show_bar:
                     try:
                         elapsed_float = float(elapsed)
@@ -875,27 +1025,41 @@ def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
                             progress_bar_str = render_progress_bar(
                                 filled_blocks, bar_length, style
                             )
-                            output += f" {progress_bar_str}"
                     except (ValueError, TypeError):
                         pass
 
-                # Add time info
-                output += f" {position_str}/{duration_str}]"
-
-                # Add playlist position if relevant
-                if playlist_ctx.get("position") and playlist_ctx.get("total"):
-                    pos = playlist_ctx["position"]
+                # Build context-aware suffix
+                context_suffix = ""
+                if sync_status == "unresolved":
+                    # YouTube track not yet resolved
+                    context_suffix = " [Resolving...]"
+                elif playlist_ctx.get("current_pos") and playlist_ctx.get("total"):
+                    pos = playlist_ctx["current_pos"]
                     total = playlist_ctx["total"]
                     # Show position for first, last, or single-track playlists
-                    if pos == 1 or pos == total or total == 1:
-                        output += f" [{pos}/{total}]"
+                    if total == 1:
+                        context_suffix = " [1/1]"
+                    elif pos == 1:
+                        context_suffix = f" [1/{total}]"
+                    elif pos == total:
+                        context_suffix = f" [{total}/{total}]"
 
-                # Check for unresolved YouTube track
-                if track_type == "youtube" and sync_status == "unresolved":
-                    output += " [Resolving...]"
+                # Use adaptive truncation that protects timestamps
+                output = adaptive_truncate_status(
+                    icon=icon,
+                    artist=artist,
+                    title=title,
+                    position_str=position_str,
+                    duration_str=duration_str,
+                    progress_bar_str=progress_bar_str,
+                    context_suffix=context_suffix,
+                    max_length=max_length,
+                    min_bar_length=5,
+                )
 
-        # Truncate if needed (use smart truncation)
-        output = smart_truncate(output, max_length)
+        # Truncate if needed (for compact mode or custom format)
+        if compact_mode or custom_format:
+            output = smart_truncate(output, max_length)
 
         # Build additional lines for next/previous tracks if enabled
         additional_lines = []
@@ -1236,7 +1400,7 @@ def main() -> None:
                         filled_blocks = calculate_progress(
                             elapsed_float, duration_float, bar_length
                         )
-                        progress_bar_str = " " + render_progress_bar(
+                        progress_bar_str = render_progress_bar(
                             filled_blocks, bar_length, style
                         )
                 except (ValueError, TypeError):
@@ -1262,11 +1426,22 @@ def main() -> None:
                 elif pos == total:
                     context_suffix = f" [{total}/{total}]"
 
-            # Build main output string
-            output = f"{icon} {artist} - {title} [{position_str}{progress_bar_str} {duration_str}]{context_suffix}"
+            # Use adaptive truncation that protects timestamps
+            output = adaptive_truncate_status(
+                icon=icon,
+                artist=artist,
+                title=title,
+                position_str=position_str,
+                duration_str=duration_str,
+                progress_bar_str=progress_bar_str,
+                context_suffix=context_suffix,
+                max_length=max_length,
+                min_bar_length=5,
+            )
 
-        # Truncate if needed (use smart truncation)
-        output = smart_truncate(output, max_length)
+        # Truncate if needed (for compact mode or custom format)
+        if compact_mode or custom_format:
+            output = smart_truncate(output, max_length)
 
         # Build additional lines for next/previous tracks if enabled
         additional_lines = []
