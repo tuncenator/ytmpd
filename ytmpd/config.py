@@ -57,6 +57,8 @@ def load_config() -> dict[str, Any]:
         "proxy_host": "localhost",
         "proxy_port": 8080,
         "proxy_track_mapping_db": str(config_dir / "track_mapping.db"),
+        # Radio feature settings
+        "radio_playlist_limit": 25,
     }
 
     # Load existing config or create default
@@ -195,6 +197,14 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 "mpd_music_directory is required when playlist_format is 'xspf'. "
                 "Please configure mpd_music_directory in config.yaml."
+            )
+
+    # Validate radio_playlist_limit
+    if "radio_playlist_limit" in config:
+        limit = config["radio_playlist_limit"]
+        if not isinstance(limit, int) or limit < 10 or limit > 50:
+            raise ValueError(
+                f"radio_playlist_limit must be an integer between 10 and 50, got: {limit}"
             )
 
     return config

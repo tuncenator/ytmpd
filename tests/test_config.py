@@ -336,3 +336,150 @@ class TestMPDConfigFields:
             with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
                 config = load_config()
                 assert config["sync_interval_minutes"] == 10080
+
+
+class TestRadioConfigFields:
+    """Tests for radio feature configuration fields."""
+
+    def test_load_config_includes_radio_playlist_limit_default(self) -> None:
+        """Test that load_config includes radio_playlist_limit default value."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_config_dir = Path(tmpdir) / "ytmpd"
+
+            with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
+                config = load_config()
+
+                # Check default value
+                assert "radio_playlist_limit" in config
+                assert config["radio_playlist_limit"] == 25
+
+    def test_radio_playlist_limit_valid_values(self) -> None:
+        """Test that radio_playlist_limit accepts valid values (10-50)."""
+        valid_values = [10, 25, 50]
+
+        for value in valid_values:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                mock_config_dir = Path(tmpdir) / "ytmpd"
+                mock_config_dir.mkdir(parents=True)
+
+                config_file = mock_config_dir / "config.yaml"
+                custom_config = {
+                    "radio_playlist_limit": value,
+                }
+
+                with open(config_file, "w") as f:
+                    yaml.safe_dump(custom_config, f)
+
+                with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
+                    config = load_config()
+                    assert config["radio_playlist_limit"] == value
+
+    def test_radio_playlist_limit_below_minimum(self) -> None:
+        """Test that radio_playlist_limit below 10 raises ValueError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_config_dir = Path(tmpdir) / "ytmpd"
+            mock_config_dir.mkdir(parents=True)
+
+            config_file = mock_config_dir / "config.yaml"
+            invalid_config = {
+                "radio_playlist_limit": 9,
+            }
+
+            with open(config_file, "w") as f:
+                yaml.safe_dump(invalid_config, f)
+
+            with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
+                with pytest.raises(
+                    ValueError,
+                    match="radio_playlist_limit must be an integer between 10 and 50",
+                ):
+                    load_config()
+
+    def test_radio_playlist_limit_above_maximum(self) -> None:
+        """Test that radio_playlist_limit above 50 raises ValueError."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_config_dir = Path(tmpdir) / "ytmpd"
+            mock_config_dir.mkdir(parents=True)
+
+            config_file = mock_config_dir / "config.yaml"
+            invalid_config = {
+                "radio_playlist_limit": 51,
+            }
+
+            with open(config_file, "w") as f:
+                yaml.safe_dump(invalid_config, f)
+
+            with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
+                with pytest.raises(
+                    ValueError,
+                    match="radio_playlist_limit must be an integer between 10 and 50",
+                ):
+                    load_config()
+
+    def test_radio_playlist_limit_not_integer(self) -> None:
+        """Test that radio_playlist_limit must be an integer."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_config_dir = Path(tmpdir) / "ytmpd"
+            mock_config_dir.mkdir(parents=True)
+
+            config_file = mock_config_dir / "config.yaml"
+            invalid_config = {
+                "radio_playlist_limit": "25",  # String instead of int
+            }
+
+            with open(config_file, "w") as f:
+                yaml.safe_dump(invalid_config, f)
+
+            with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
+                with pytest.raises(
+                    ValueError,
+                    match="radio_playlist_limit must be an integer between 10 and 50",
+                ):
+                    load_config()
+
+    def test_radio_playlist_limit_float_rejected(self) -> None:
+        """Test that radio_playlist_limit rejects float values."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_config_dir = Path(tmpdir) / "ytmpd"
+            mock_config_dir.mkdir(parents=True)
+
+            config_file = mock_config_dir / "config.yaml"
+            invalid_config = {
+                "radio_playlist_limit": 25.5,  # Float instead of int
+            }
+
+            with open(config_file, "w") as f:
+                yaml.safe_dump(invalid_config, f)
+
+            with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
+                with pytest.raises(
+                    ValueError,
+                    match="radio_playlist_limit must be an integer between 10 and 50",
+                ):
+                    load_config()
+
+    def test_old_config_without_radio_field_still_loads(self) -> None:
+        """Test backward compatibility: old configs without radio_playlist_limit still load."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_config_dir = Path(tmpdir) / "ytmpd"
+            mock_config_dir.mkdir(parents=True)
+
+            config_file = mock_config_dir / "config.yaml"
+            # Old config without radio field
+            old_config = {
+                "socket_path": "/old/socket",
+                "log_level": "DEBUG",
+            }
+
+            with open(config_file, "w") as f:
+                yaml.safe_dump(old_config, f)
+
+            with patch("ytmpd.config.get_config_dir", return_value=mock_config_dir):
+                config = load_config()
+
+                # Old fields preserved
+                assert config["socket_path"] == "/old/socket"
+                assert config["log_level"] == "DEBUG"
+
+                # New radio field uses default
+                assert config["radio_playlist_limit"] == 25

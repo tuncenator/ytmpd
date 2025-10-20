@@ -94,3 +94,11 @@ proxy_port: 8080
 # Default: ~/.config/ytmpd/track_mapping.db
 # This SQLite database maps stream URLs to track metadata
 proxy_track_mapping_db: ~/.config/ytmpd/track_mapping.db
+
+# ===== Radio Feature Settings =====
+
+# Number of tracks to fetch for radio playlists
+# Radio playlists are generated from a currently playing track or search result
+# Default: 25
+# Valid range: 10-50
+radio_playlist_limit: 25
