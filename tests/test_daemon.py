@@ -1163,8 +1163,7 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Mock MPD client to return empty current song
-        daemon.mpd_client._client = Mock()
-        daemon.mpd_client._client.currentsong.return_value = None
+        daemon.mpd_client.currentsong = Mock(return_value=None)
 
         # Call radio command
         response = daemon._cmd_radio(None)
@@ -1206,11 +1205,10 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Mock MPD client to return non-YouTube track
-        daemon.mpd_client._client = Mock()
-        daemon.mpd_client._client.currentsong.return_value = {
+        daemon.mpd_client.currentsong = Mock(return_value={
             "file": "/path/to/local/file.mp3",
             "title": "Local Track"
-        }
+        })
 
         # Call radio command
         response = daemon._cmd_radio(None)
@@ -1256,11 +1254,10 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Mock MPD client to return YouTube track
-        daemon.mpd_client._client = Mock()
-        daemon.mpd_client._client.currentsong.return_value = {
+        daemon.mpd_client.currentsong = Mock(return_value={
             "file": "http://localhost:6602/proxy/2xOPkdtFeHM",
             "title": "Test Track"
-        }
+        })
 
         # Mock YTMusic client's get_watch_playlist
         daemon.ytmusic_client._client = Mock()
@@ -1306,8 +1303,8 @@ class TestDaemonRadioSearchCommands:
             limit=25
         )
 
-        # Verify resolve_batch was called
-        daemon.stream_resolver.resolve_batch.assert_called_once()
+        # Verify resolve_batch was NOT called (since proxy is enabled, lazy resolution is used)
+        daemon.stream_resolver.resolve_batch.assert_not_called()
 
         # Verify playlist was created
         daemon.mpd_client.create_or_replace_playlist.assert_called_once()
