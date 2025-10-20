@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""ytmpd-status - i3blocks status script for ytmpd.
+
+This script queries ytmpd daemon status and formats it for i3blocks display.
+
+Environment Variables:
+    YTMPD_STATUS_MAX_LENGTH: Maximum length before truncation (default: 50)
+    YTMPD_STATUS_FORMAT: Custom format string (default: "{icon} {artist} - {title} [{position}/{duration}]")
+
+Color Codes (for i3blocks):
+    Playing: #00FF00 (green)
+    Paused: #FFFF00 (yellow)
+    Stopped: #808080 (gray)
+"""
+
+import os
+import socket
+import sys
+from pathlib import Path
+
+
+def get_socket_path() -> Path:
+    """Get the path to the ytmpd Unix socket.
+
+    Returns:
+        Path to the socket file.
+    """
+    # Use same default path as ytmpctl
+    return Path.home() / ".config" / "ytmpd" / "socket"
+
+
+def send_command(cmd: str) -> str | None:
+    """Send a command to the daemon and return the response.
+
+    Args:
+        cmd: Command to send.
+
+    Returns:
+        Response from daemon, or None if daemon is not running.
+    """
+    socket_path = get_socket_path()
+
+    if not socket_path.exists():
+        return None
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(str(socket_path))
+        sock.sendall(f"{cmd}\n".encode())
+
+        # Read response
+        response = b""
+        while True:
+            chunk = sock.recv(1024)
+            if not chunk:
+                break
+            response += chunk
+            # Check if response is complete
+            if response.endswith(b"OK\n") or b"ERR:" in response:
+                break
+
+        sock.close()
+        return response.decode().strip()
+    except (ConnectionRefusedError, FileNotFoundError, OSError):
+        return None
+
+
+def parse_status(response: str) -> dict[str, str]:
+    """Parse status response into a dictionary.
+
+    Args:
+        response: Status response from daemon.
+
+    Returns:
+        Dictionary with status fields.
+    """
+    status = {}
+    for line in response.split("\n"):
+        if ":" in line and line != "OK":
+            key, value = line.split(":", 1)
+            status[key.strip()] = value.strip()
+    return status
+
+
+def format_time(seconds: str) -> str:
+    """Format seconds as MM:SS.
+
+    Args:
+        seconds: Time in seconds as string.
+
+    Returns:
+        Formatted time string.
+    """
+    try:
+        total_seconds = int(seconds)
+        minutes = total_seconds // 60
+        secs = total_seconds % 60
+        return f"{minutes}:{secs:02d}"
+    except (ValueError, TypeError):
+        return "0:00"
+
+
+def truncate(text: str, max_length: int) -> str:
+    """Truncate text to max_length with ellipsis if needed.
+
+    Args:
+        text: Text to truncate.
+        max_length: Maximum length.
+
+    Returns:
+        Truncated text.
+    """
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
+
+
+def main() -> None:
+    """Display ytmpd status for i3blocks."""
+    # Get configuration from environment
+    max_length = int(os.environ.get("YTMPD_STATUS_MAX_LENGTH", "50"))
+
+    # Query daemon status
+    response = send_command("status")
+
+    if response is None or response.startswith("ERR:"):
+        # Daemon not running or error
+        print("⏹ ytmpd")
+        print("⏹ ytmpd")  # Short text
+        print("#808080")  # Gray color
+        sys.exit(0)
+
+    # Parse status
+    status = parse_status(response)
+    state = status.get("state", "stopped")
+
+    if state == "stopped":
+        print("⏹ ytmpd")
+        print("⏹ ytmpd")  # Short text
+        print("#808080")  # Gray color
+        sys.exit(0)
+
+    # Get song info
+    title = status.get("title", "Unknown")
+    artist = status.get("artist", "Unknown")
+    position = status.get("position", "0")
+    duration = status.get("duration", "0")
+
+    # Format time
+    position_str = format_time(position)
+    duration_str = format_time(duration)
+
+    # Choose icon based on state
+    if state == "playing":
+        icon = "▶"
+        color = "#00FF00"  # Green
+    elif state == "paused":
+        icon = "⏸"
+        color = "#FFFF00"  # Yellow
+    else:
+        icon = "⏹"
+        color = "#808080"  # Gray
+
+    # Build output string
+    output = f"{icon} {artist} - {title} [{position_str}/{duration_str}]"
+
+    # Truncate if needed
+    output = truncate(output, max_length)
+
+    # Output for i3blocks
+    print(output)  # Full text
+    print(output)  # Short text (same as full for now)
+    print(color)  # Color
+
+
+if __name__ == "__main__":
+    main()

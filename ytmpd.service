@@ -1,0 +1,23 @@
+[Unit]
+Description=YouTube Music MPD daemon
+Documentation=https://github.com/tuncenator/ytmpd
+After=network.target
+
+[Service]
+Type=simple
+# Update the path below to match your installation directory
+ExecStart=%h/Sync/Programs/ytmpd/.venv/bin/python -m ytmpd
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/ytmpd
+
+[Install]
+WantedBy=default.target

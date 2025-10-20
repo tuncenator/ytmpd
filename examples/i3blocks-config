@@ -1,0 +1,23 @@
+# ytmpd i3blocks configuration
+#
+# Add this to your i3blocks config file (usually ~/.config/i3blocks/config)
+# or create a new config file and include it in your main i3blocks config.
+#
+# To use this configuration:
+# 1. Make sure ytmpd daemon is running
+# 2. Add the block below to your i3blocks config
+# 3. Reload i3blocks (killall -SIGUSR1 i3blocks)
+
+[ytmpd]
+# Path to ytmpd-status script
+command=/path/to/ytmpd/bin/ytmpd-status
+
+# Update interval in seconds (how often to query daemon)
+interval=5
+
+# Optional: Set maximum length for display (default: 50)
+# Uncomment and adjust as needed:
+# YTMPD_STATUS_MAX_LENGTH=40
+
+# Block separator
+separator_block_width=15

@@ -1,0 +1,343 @@
+#!/usr/bin/env python3
+"""ytmpctl - Command-line client for ytmpd sync daemon."""
+
+import json
+import os
+import socket
+import sys
+from pathlib import Path
+from typing import Any, NoReturn
+
+
+def get_sync_socket_path() -> Path:
+    """Get the Unix socket path for ytmpd sync daemon.
+
+    Returns:
+        Path to the sync socket file.
+    """
+    config_dir = Path.home() / ".config" / "ytmpd"
+    return config_dir / "sync_socket"
+
+
+def send_command(command: str) -> dict[str, Any]:
+    """Send a command to the ytmpd daemon and return the JSON response.
+
+    Args:
+        command: Command string to send to daemon
+
+    Returns:
+        Parsed JSON response as dict
+
+    Raises:
+        SystemExit: If connection fails or daemon returns error
+    """
+    socket_path = get_sync_socket_path()
+
+    # Check if socket exists
+    if not socket_path.exists():
+        print("Error: ytmpd daemon is not running", file=sys.stderr)
+        print("Start the daemon with: python -m ytmpd &", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        # Connect to Unix socket
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(str(socket_path))
+
+        # Send command
+        sock.sendall((command + "\n").encode("utf-8"))
+
+        # Receive response (read until newline)
+        response = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            if b"\n" in response:
+                break
+
+        sock.close()
+
+        # Parse JSON response
+        response_text = response.decode("utf-8").strip()
+        result = json.loads(response_text)
+
+        return result
+
+    except ConnectionRefusedError:
+        print("Error: Failed to connect to daemon", file=sys.stderr)
+        print("Make sure ytmpd is running: python -m ytmpd &", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError:
+        print("Error: ytmpd daemon socket not found", file=sys.stderr)
+        print("Start the daemon with: python -m ytmpd &", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid response from daemon: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def has_unicode_support() -> bool:
+    """Check if terminal supports Unicode symbols.
+
+    Returns:
+        True if Unicode is supported, False otherwise.
+    """
+    # Check LANG environment variable for UTF-8
+    lang = os.environ.get("LANG", "")
+    return "UTF-8" in lang or "utf8" in lang
+
+
+def has_color_support() -> bool:
+    """Check if terminal supports ANSI color codes.
+
+    Returns:
+        True if colors are supported, False otherwise.
+    """
+    # Check if stdout is a TTY and TERM is set
+    return sys.stdout.isatty() and os.environ.get("TERM", "dumb") != "dumb"
+
+
+def colorize(text: str, color: str) -> str:
+    """Colorize text if terminal supports it.
+
+    Args:
+        text: Text to colorize
+        color: Color name (green, red, yellow, blue)
+
+    Returns:
+        Colored text or plain text if colors not supported
+    """
+    if not has_color_support():
+        return text
+
+    colors = {
+        "green": "\033[32m",
+        "red": "\033[31m",
+        "yellow": "\033[33m",
+        "blue": "\033[34m",
+        "bold": "\033[1m",
+        "reset": "\033[0m",
+    }
+
+    color_code = colors.get(color, "")
+    reset_code = colors.get("reset", "")
+
+    return f"{color_code}{text}{reset_code}"
+
+
+def format_datetime(iso_str: str | None) -> str:
+    """Format ISO datetime string to human-readable format.
+
+    Args:
+        iso_str: ISO format datetime string
+
+    Returns:
+        Formatted datetime or "Never" if None
+    """
+    if not iso_str:
+        return "Never"
+
+    # Simple formatting - just show date and time
+    # Format: 2025-10-17T14:30:00Z -> 2025-10-17 14:30:00
+    try:
+        return iso_str.replace("T", " ").replace("Z", "")
+    except Exception:
+        return iso_str
+
+
+def cmd_sync() -> None:
+    """Trigger immediate sync."""
+    print("Triggering sync...")
+    result = send_command("sync")
+
+    if result.get("success"):
+        check = "✓" if has_unicode_support() else "OK"
+        msg = result.get("message", "Sync triggered")
+        print(colorize(f"{check} {msg}", "green"))
+        print("Sync running in background. Use 'ytmpctl status' to check progress.")
+    else:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        error = result.get("error", "Unknown error")
+        print(colorize(f"{cross} {error}", "red"), file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_status() -> None:
+    """Show sync status and statistics."""
+    result = send_command("status")
+
+    if not result.get("success"):
+        print(colorize("Error getting status", "red"), file=sys.stderr)
+        sys.exit(1)
+
+    # Header
+    print(colorize("=== ytmpd Sync Status ===", "bold"))
+    print()
+
+    # Last sync time
+    last_sync = format_datetime(result.get("last_sync"))
+    print(f"Last sync: {last_sync}")
+
+    # Daemon start time
+    daemon_start = format_datetime(result.get("daemon_start_time"))
+    print(f"Daemon started: {daemon_start}")
+    print()
+
+    # Sync in progress indicator
+    if result.get("sync_in_progress"):
+        print(colorize("Status: Sync in progress...", "yellow"))
+    else:
+        success = result.get("last_sync_success", False)
+        if last_sync == "Never":
+            print(colorize("Status: No sync performed yet", "yellow"))
+        elif success:
+            print(colorize("Status: Last sync successful", "green"))
+        else:
+            print(colorize("Status: Last sync had errors", "red"))
+    print()
+
+    # Statistics (only if we have sync results)
+    if last_sync != "Never":
+        print(colorize("=== Last Sync Statistics ===", "bold"))
+        playlists_synced = result.get("playlists_synced", 0)
+        playlists_failed = result.get("playlists_failed", 0)
+        tracks_added = result.get("tracks_added", 0)
+        tracks_failed = result.get("tracks_failed", 0)
+
+        print(f"Playlists synced: {playlists_synced}")
+        if playlists_failed > 0:
+            print(colorize(f"Playlists failed: {playlists_failed}", "red"))
+
+        print(f"Tracks added: {tracks_added}")
+        if tracks_failed > 0:
+            print(colorize(f"Tracks failed: {tracks_failed}", "yellow"))
+
+        # Show errors if any
+        errors = result.get("errors", [])
+        if errors:
+            print()
+            print(colorize("=== Errors ===", "red"))
+            for error in errors[:5]:  # Show max 5 errors
+                print(f"  - {error}")
+            if len(errors) > 5:
+                print(f"  ... and {len(errors) - 5} more errors")
+
+
+def cmd_list_playlists() -> None:
+    """List YouTube Music playlists."""
+    print("Fetching playlists from YouTube Music...")
+    result = send_command("list")
+
+    if not result.get("success"):
+        error = result.get("error", "Unknown error")
+        print(colorize(f"Error: {error}", "red"), file=sys.stderr)
+        sys.exit(1)
+
+    playlists = result.get("playlists", [])
+
+    if not playlists:
+        print("No playlists found.")
+        return
+
+    print()
+    print(colorize("=== YouTube Music Playlists ===", "bold"))
+    print()
+
+    for playlist in playlists:
+        name = playlist.get("name", "Unknown")
+        track_count = playlist.get("track_count", 0)
+        print(f"  • {name} ({track_count} tracks)")
+
+    print()
+    print(f"Total: {len(playlists)} playlists")
+    print()
+    print("To load a playlist in MPD, use:")
+    print(colorize('  mpc load "YT: <playlist-name>"', "blue"))
+
+
+def show_help() -> None:
+    """Display help message."""
+    help_text = f"""{colorize("ytmpctl", "bold")} - YouTube Music to MPD sync control
+
+{colorize("Usage:", "bold")}
+  ytmpctl sync              Trigger immediate sync
+  ytmpctl status            Show sync status and statistics
+  ytmpctl list-playlists    List YouTube Music playlists
+  ytmpctl help              Show this help message
+
+{colorize("Playback Control:", "bold")}
+  Use mpc for playback control of synced playlists:
+    mpc load "YT: Favorites"    Load YouTube playlist in MPD
+    mpc play                     Start playback
+    mpc pause                    Pause playback
+    mpc next                     Next track
+    mpc prev                     Previous track
+    mpc status                   Show playback status
+    mpc current                  Show current track
+
+{colorize("Configuration:", "bold")}
+  Config file: ~/.config/ytmpd/config.yaml
+  Auth file:   ~/.config/ytmpd/browser.json (or oauth.json)
+  State file:  ~/.config/ytmpd/sync_state.json
+
+{colorize("Logs:", "bold")}
+  Log file: ~/.config/ytmpd/ytmpd.log
+
+{colorize("Examples:", "bold")}
+  # Start daemon in background
+  python -m ytmpd &
+
+  # Trigger sync manually
+  ytmpctl sync
+
+  # Check sync status
+  ytmpctl status
+
+  # List available playlists
+  ytmpctl list-playlists
+
+  # Load and play a YouTube playlist
+  mpc load "YT: Workout"
+  mpc play
+
+{colorize("Note:", "bold")}
+  ytmpd syncs YouTube Music playlists to MPD with "YT: " prefix.
+  Playback is controlled through MPD using mpc commands.
+  The daemon automatically syncs playlists periodically (default: 30 minutes).
+"""
+    print(help_text)
+
+
+def main() -> NoReturn:
+    """Main entry point for ytmpctl client."""
+    if len(sys.argv) < 2:
+        show_help()
+        sys.exit(0)
+
+    command = sys.argv[1].lower()
+    args = sys.argv[2:]
+
+    # Dispatch commands
+    if command == "sync":
+        cmd_sync()
+    elif command == "status":
+        cmd_status()
+    elif command == "list-playlists" or command == "list":
+        cmd_list_playlists()
+    elif command == "help" or command == "--help" or command == "-h":
+        show_help()
+    else:
+        print(f"Error: Unknown command: {command}", file=sys.stderr)
+        print("Run 'ytmpctl help' for usage information", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

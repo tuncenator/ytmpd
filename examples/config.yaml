@@ -1,0 +1,96 @@
+# ytmpd Configuration File
+# This file is automatically created at ~/.config/ytmpd/config.yaml on first run
+# All paths can be absolute or relative to ~/.config/ytmpd/
+
+# ===== Core Settings =====
+
+# Path to the Unix socket for client-daemon communication
+# Default: ~/.config/ytmpd/socket
+socket_path: ~/.config/ytmpd/socket
+
+# Path to the state persistence file
+# Default: ~/.config/ytmpd/state.json
+state_file: ~/.config/ytmpd/state.json
+
+# Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+# Default: INFO
+log_level: INFO
+
+# Path to the log file
+# Default: ~/.config/ytmpd/ytmpd.log
+log_file: ~/.config/ytmpd/ytmpd.log
+
+# ===== MPD Integration Settings =====
+
+# Path to the MPD Unix socket
+# Default: ~/.config/mpd/socket
+# This is the Unix socket that MPD listens on (not TCP port)
+mpd_socket_path: ~/.config/mpd/socket
+
+# Path to MPD's playlist directory
+# Default: ~/.config/mpd/playlists
+# This is where ytmpd will write M3U playlist files
+mpd_playlist_directory: ~/.config/mpd/playlists
+
+# Sync interval in minutes
+# How often to automatically sync YouTube Music playlists to MPD
+# Default: 30
+sync_interval_minutes: 30
+
+# Enable automatic periodic sync
+# If false, sync only happens when manually triggered via ytmpctl
+# Default: true
+enable_auto_sync: true
+
+# Playlist prefix for YouTube playlists in MPD
+# All YouTube Music playlists will appear in MPD with this prefix
+# Example: "YT: " makes a playlist "Favorites" appear as "YT: Favorites"
+# Can be empty string to disable prefix
+# Default: "YT: "
+playlist_prefix: "YT: "
+
+# Stream URL cache duration in hours
+# YouTube stream URLs expire after ~6 hours
+# Caching for 5 hours gives 1-hour buffer for re-sync
+# Default: 5
+stream_cache_hours: 5
+
+# ===== Playlist Format Settings =====
+
+# Playlist format: "m3u" or "xspf"
+# - M3U: Traditional format with EXTINF tags (single "Name" field in MPD)
+# - XSPF: XML format with separate artist/title fields (separate %artist%/%title% in MPD)
+# XSPF provides proper metadata display in ncmpcpp with color-coded artist/title fields
+# and duration information, but requires mpd_music_directory to be configured.
+# Default: "m3u"
+playlist_format: xspf
+
+# Path to MPD's music directory
+# Required for XSPF format - XSPF playlists are created in music_dir/_youtube/
+# This should match the music_directory setting in your mpd.conf
+# Default: ~/Music
+# Leave commented out to disable XSPF support
+mpd_music_directory: ~/Music
+
+# ===== ICY Proxy Settings =====
+
+# Enable ICY metadata proxy server
+# When enabled, ytmpd runs a proxy that adds ICY metadata to streams
+# This allows MPD to display track information for YouTube Music streams
+# Default: true
+proxy_enabled: true
+
+# Proxy server host/IP address
+# Default: localhost
+# Use "0.0.0.0" to listen on all interfaces (useful for remote access)
+proxy_host: localhost
+
+# Proxy server port
+# Default: 8080
+# Must be between 1 and 65535
+proxy_port: 8080
+
+# Path to the track mapping database for ICY metadata
+# Default: ~/.config/ytmpd/track_mapping.db
+# This SQLite database maps stream URLs to track metadata
+proxy_track_mapping_db: ~/.config/ytmpd/track_mapping.db
