@@ -6,7 +6,7 @@ After=network.target
 [Service]
 Type=simple
 # Update the path below to match your installation directory
-ExecStart=%h/Sync/Programs/ytmpd/.venv/bin/python -m ytmpd
+ExecStart=/path/to/ytmpd/.venv/bin/python -m ytmpd
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -17,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.config/ytmpd
+ReadWritePaths=%h/.config/ytmpd %h/Music
 
 [Install]
 WantedBy=default.target

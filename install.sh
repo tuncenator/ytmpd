@@ -126,9 +126,24 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     # Create systemd user directory if needed
     mkdir -p "$HOME/.config/systemd/user"
 
+    # Detect music directory from config
+    MUSIC_DIR="$HOME/Music"  # Default
+    if [ -f "$HOME/.config/ytmpd/config.yaml" ]; then
+        # Try to read mpd_music_directory from config
+        CONFIG_MUSIC_DIR=$(grep "^mpd_music_directory:" "$HOME/.config/ytmpd/config.yaml" | sed 's/^mpd_music_directory:[[:space:]]*//' | sed 's/#.*//' | tr -d '"' | tr -d "'")
+        if [ -n "$CONFIG_MUSIC_DIR" ]; then
+            # Expand ~ to $HOME
+            MUSIC_DIR="${CONFIG_MUSIC_DIR/#\~/$HOME}"
+        fi
+    fi
+
+    info "Detected music directory: $MUSIC_DIR"
+
     # Copy and customize service file
     SERVICE_FILE="$HOME/.config/systemd/user/ytmpd.service"
-    sed "s|/path/to/ytmpd|$SCRIPT_DIR|g" ytmpd.service > "$SERVICE_FILE"
+    sed -e "s|/path/to/ytmpd|$SCRIPT_DIR|g" \
+        -e "s|%h/Music|$MUSIC_DIR|g" \
+        ytmpd.service > "$SERVICE_FILE"
 
     info "systemd service installed to $SERVICE_FILE"
     info "To enable and start the service, run:"
@@ -138,50 +153,34 @@ else
     info "Skipping systemd service installation"
 fi
 
-# Step 7: Add binaries to PATH
+# Step 7: Install binaries
 info ""
 info "=========================================="
-info "PATH Configuration"
+info "Binary Installation"
 info "=========================================="
 info ""
 info "ytmpd provides two executables:"
 info "  - ytmpctl: Command-line client"
 info "  - ytmpd-status: i3blocks status script"
 info ""
-info "These are located in: $SCRIPT_DIR/bin"
-info ""
-info "To use them, you need to either:"
-info "  1. Add $SCRIPT_DIR/bin to your PATH"
-info "  2. Use absolute paths in your i3/i3blocks configs"
-info ""
-read -p "Do you want to add $SCRIPT_DIR/bin to your PATH? [y/N] " -n 1 -r
+read -p "Do you want to install binaries to ~/.local/bin? [Y/n] " -n 1 -r
 echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Detect shell
-    if [ -n "$BASH_VERSION" ]; then
-        SHELL_RC="$HOME/.bashrc"
-    elif [ -n "$ZSH_VERSION" ]; then
-        SHELL_RC="$HOME/.zshrc"
-    else
-        warn "Could not detect shell. Please add the following to your shell RC file:"
-        warn "  export PATH=\"$SCRIPT_DIR/bin:\$PATH\""
-        SHELL_RC=""
-    fi
+if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
+    # Create ~/.local/bin if it doesn't exist
+    mkdir -p "$HOME/.local/bin"
 
-    if [ -n "$SHELL_RC" ]; then
-        # Check if already in PATH
-        if grep -q "$SCRIPT_DIR/bin" "$SHELL_RC" 2>/dev/null; then
-            info "PATH already configured in $SHELL_RC"
-        else
-            echo "" >> "$SHELL_RC"
-            echo "# ytmpd binaries" >> "$SHELL_RC"
-            echo "export PATH=\"$SCRIPT_DIR/bin:\$PATH\"" >> "$SHELL_RC"
-            info "PATH added to $SHELL_RC"
-            info "Run 'source $SHELL_RC' or restart your shell to apply changes"
-        fi
-    fi
+    # Create symlinks
+    ln -sf "$SCRIPT_DIR/bin/ytmpctl" "$HOME/.local/bin/ytmpctl"
+    ln -sf "$SCRIPT_DIR/bin/ytmpd-status" "$HOME/.local/bin/ytmpd-status"
+
+    info "Binaries installed to ~/.local/bin"
+    info "Note: ~/.local/bin should be in your PATH (usually added by default)"
+    info "If not, add this to your shell RC file:"
+    info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
 else
-    info "Skipping PATH configuration"
+    info "Skipping binary installation. You can use absolute paths:"
+    info "  $SCRIPT_DIR/bin/ytmpctl"
+    info "  $SCRIPT_DIR/bin/ytmpd-status"
 fi
 
 # Step 8: Installation summary
