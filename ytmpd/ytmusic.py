@@ -19,6 +19,22 @@ from ytmpd.exceptions import YTMusicAPIError, YTMusicAuthError, YTMusicNotFoundE
 logger = logging.getLogger(__name__)
 
 
+def _truncate_error(error: Exception, max_length: int = 200) -> str:
+    """Truncate error message for logging to prevent massive log lines.
+
+    Args:
+        error: Exception to format.
+        max_length: Maximum length of error string.
+
+    Returns:
+        Truncated error message.
+    """
+    error_str = str(error)
+    if len(error_str) <= max_length:
+        return error_str
+    return error_str[:max_length] + "... (truncated)"
+
+
 @dataclass
 class Playlist:
     """Represents a YouTube Music playlist.
@@ -134,7 +150,7 @@ class YTMusicClient:
             except Exception as e:
                 last_error = e
                 logger.warning(
-                    f"API call failed (attempt {attempt + 1}/{max_retries}): {e}"
+                    f"API call failed (attempt {attempt + 1}/{max_retries}): {_truncate_error(e)}"
                 )
 
                 # Don't retry on authentication errors
@@ -148,8 +164,8 @@ class YTMusicClient:
                     time.sleep(sleep_time)
 
         # All retries failed
-        logger.error(f"API call failed after {max_retries} attempts: {last_error}")
-        raise YTMusicAPIError(f"API call failed: {last_error}") from last_error
+        logger.error(f"API call failed after {max_retries} attempts: {_truncate_error(last_error)}")
+        raise YTMusicAPIError(f"API call failed: {_truncate_error(last_error, max_length=300)}") from last_error
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search for songs on YouTube Music.

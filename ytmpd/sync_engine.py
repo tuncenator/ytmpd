@@ -18,6 +18,22 @@ from ytmpd.ytmusic import Playlist, Track, YTMusicClient
 logger = logging.getLogger(__name__)
 
 
+def _truncate_error(error: Exception, max_length: int = 120) -> str:
+    """Truncate error message for logging to prevent massive log lines.
+
+    Args:
+        error: Exception to format.
+        max_length: Maximum length of error string.
+
+    Returns:
+        Truncated error message.
+    """
+    error_str = str(error)
+    if len(error_str) <= max_length:
+        return error_str
+    return error_str[:max_length] + "... (truncated)"
+
+
 @dataclass
 class SyncResult:
     """Result of a sync operation.
@@ -208,7 +224,7 @@ class SyncEngine:
 
                 except Exception as e:
                     playlists_failed += 1
-                    error_msg = f"Failed to sync playlist '{playlist.name}': {e}"
+                    error_msg = f"Failed to sync playlist '{playlist.name}': {_truncate_error(e)}"
                     logger.error(error_msg)
                     errors.append(error_msg)
                     # Continue with next playlist - don't let one failure stop sync
@@ -322,7 +338,7 @@ class SyncEngine:
             )
 
         except Exception as e:
-            error_msg = f"Failed to sync playlist '{playlist_name}': {e}"
+            error_msg = f"Failed to sync playlist '{playlist_name}': {_truncate_error(e)}"
             logger.error(error_msg)
             duration = time.time() - start_time
             return SyncResult(
