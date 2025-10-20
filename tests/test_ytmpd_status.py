@@ -431,7 +431,7 @@ class TestOutputFormatting:
         lines = captured.out.strip().split("\n")
 
         assert len(lines[0]) <= 30
-        assert lines[0].endswith("...")
+        assert "…" in lines[0]  # Check for proper ellipsis character
 
     @patch("ytmpd_status.get_mpd_client")
     @patch("ytmpd_status.get_track_type")
@@ -774,3 +774,501 @@ class TestProgressBarIntegration:
         assert "░" not in lines[0]
         assert "▰" not in lines[0]
         assert "▱" not in lines[0]
+
+
+class TestGetPlaylistContext:
+    """Test playlist context retrieval."""
+
+    def test_basic_playlist_context(self):
+        """Test getting context from middle of playlist."""
+        mock_client = MagicMock()
+        mock_client.status.return_value = {
+            "song": "4",  # 0-indexed position (5th song)
+            "playlistlength": "10"
+        }
+        mock_client.currentsong.return_value = {"title": "Current"}
+
+        # Mock next and prev track info
+        mock_client.playlistinfo.side_effect = [
+            [{"artist": "Next Artist", "title": "Next Title"}],  # Next track
+            [{"artist": "Prev Artist", "title": "Prev Title"}],  # Prev track
+        ]
+
+        context = ytmpd_status.get_playlist_context(mock_client)
+
+        assert context["current_pos"] == 5  # 1-indexed
+        assert context["total"] == 10
+        assert context["next"]["artist"] == "Next Artist"
+        assert context["next"]["title"] == "Next Title"
+        assert context["prev"]["artist"] == "Prev Artist"
+        assert context["prev"]["title"] == "Prev Title"
+
+    def test_first_track_in_playlist(self):
+        """Test context when on first track."""
+        mock_client = MagicMock()
+        mock_client.status.return_value = {
+            "song": "0",
+            "playlistlength": "5"
+        }
+        mock_client.currentsong.return_value = {"title": "First"}
+        mock_client.playlistinfo.return_value = [
+            {"artist": "Next Artist", "title": "Next Title"}
+        ]
+
+        context = ytmpd_status.get_playlist_context(mock_client)
+
+        assert context["current_pos"] == 1
+        assert context["total"] == 5
+        assert context["next"] is not None
+        assert context["prev"] is None
+
+    def test_last_track_in_playlist(self):
+        """Test context when on last track."""
+        mock_client = MagicMock()
+        mock_client.status.return_value = {
+            "song": "4",  # Last track (0-indexed)
+            "playlistlength": "5"
+        }
+        mock_client.currentsong.return_value = {"title": "Last"}
+        mock_client.playlistinfo.return_value = [
+            {"artist": "Prev Artist", "title": "Prev Title"}
+        ]
+
+        context = ytmpd_status.get_playlist_context(mock_client)
+
+        assert context["current_pos"] == 5
+        assert context["total"] == 5
+        assert context["next"] is None
+        assert context["prev"] is not None
+
+    def test_single_track_playlist(self):
+        """Test context with only one track."""
+        mock_client = MagicMock()
+        mock_client.status.return_value = {
+            "song": "0",
+            "playlistlength": "1"
+        }
+        mock_client.currentsong.return_value = {"title": "Only"}
+
+        context = ytmpd_status.get_playlist_context(mock_client)
+
+        assert context["current_pos"] == 1
+        assert context["total"] == 1
+        assert context["next"] is None
+        assert context["prev"] is None
+
+    def test_no_song_playing(self):
+        """Test context when no song is playing."""
+        mock_client = MagicMock()
+        mock_client.status.return_value = {
+            "playlistlength": "5"
+        }  # No "song" key
+        mock_client.currentsong.return_value = {}
+
+        context = ytmpd_status.get_playlist_context(mock_client)
+
+        assert context["current_pos"] is None
+        assert context["total"] is None
+        assert context["next"] is None
+        assert context["prev"] is None
+
+    def test_exception_handling(self):
+        """Test graceful handling of exceptions."""
+        mock_client = MagicMock()
+        mock_client.status.side_effect = Exception("Connection error")
+
+        context = ytmpd_status.get_playlist_context(mock_client)
+
+        assert context["current_pos"] is None
+        assert context["total"] is None
+        assert context["next"] is None
+        assert context["prev"] is None
+
+
+class TestGetSyncStatus:
+    """Test sync status checking."""
+
+    def test_local_file(self):
+        """Test sync status for local file."""
+        status = ytmpd_status.get_sync_status("/music/song.mp3")
+        assert status == "local"
+
+    def test_youtube_resolved(self, tmp_path):
+        """Test sync status for resolved YouTube track."""
+        # Create temporary database
+        db_path = tmp_path / ".config" / "ytmpd"
+        db_path.mkdir(parents=True)
+        db_file = db_path / "track_mapping.db"
+
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE tracks (
+                video_id TEXT PRIMARY KEY,
+                stream_url TEXT
+            )
+        """)
+        cursor.execute(
+            "INSERT INTO tracks (video_id, stream_url) VALUES (?, ?)",
+            ("dQw4w9WgXcQ", "https://youtube.com/stream/url")
+        )
+        conn.commit()
+        conn.close()
+
+        with patch("ytmpd_status.Path.home") as mock_home:
+            mock_home.return_value = tmp_path
+            status = ytmpd_status.get_sync_status("http://localhost:6602/proxy/dQw4w9WgXcQ")
+            assert status == "resolved"
+
+    def test_youtube_unresolved(self, tmp_path):
+        """Test sync status for unresolved YouTube track."""
+        # Create temporary database
+        db_path = tmp_path / ".config" / "ytmpd"
+        db_path.mkdir(parents=True)
+        db_file = db_path / "track_mapping.db"
+
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE tracks (
+                video_id TEXT PRIMARY KEY,
+                stream_url TEXT
+            )
+        """)
+        cursor.execute(
+            "INSERT INTO tracks (video_id, stream_url) VALUES (?, ?)",
+            ("dQw4w9WgXcQ", None)  # NULL stream_url
+        )
+        conn.commit()
+        conn.close()
+
+        with patch("ytmpd_status.Path.home") as mock_home:
+            mock_home.return_value = tmp_path
+            status = ytmpd_status.get_sync_status("http://localhost:6602/proxy/dQw4w9WgXcQ")
+            assert status == "unresolved"
+
+    def test_youtube_not_in_database(self, tmp_path):
+        """Test sync status for YouTube track not in database."""
+        # Create empty database
+        db_path = tmp_path / ".config" / "ytmpd"
+        db_path.mkdir(parents=True)
+        db_file = db_path / "track_mapping.db"
+
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE tracks (
+                video_id TEXT PRIMARY KEY,
+                stream_url TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        with patch("ytmpd_status.Path.home") as mock_home:
+            mock_home.return_value = tmp_path
+            status = ytmpd_status.get_sync_status("http://localhost:6602/proxy/dQw4w9WgXcQ")
+            assert status == "unknown"
+
+    def test_no_database(self, tmp_path):
+        """Test sync status when database doesn't exist."""
+        with patch("ytmpd_status.Path.home") as mock_home:
+            mock_home.return_value = tmp_path
+            status = ytmpd_status.get_sync_status("http://localhost:6602/proxy/dQw4w9WgXcQ")
+            assert status == "unknown"
+
+
+class TestSmartTruncate:
+    """Test smart truncation function."""
+
+    def test_no_truncation_needed(self):
+        """Test when text is already short enough."""
+        text = "Short text"
+        result = ytmpd_status.smart_truncate(text, 50)
+        assert result == "Short text"
+
+    def test_truncate_simple_text(self):
+        """Test truncation of simple text without separator."""
+        text = "This is a very long text that needs to be truncated"
+        result = ytmpd_status.smart_truncate(text, 30)
+        assert len(result) <= 30
+        assert result.endswith("…")
+
+    def test_preserve_artist_name(self):
+        """Test that artist name is preserved when truncating."""
+        text = "Artist Name - Very Long Song Title That Needs Truncation"
+        result = ytmpd_status.smart_truncate(text, 40)
+        assert "Artist Name" in result
+        assert result.startswith("Artist Name")
+        assert "…" in result
+
+    def test_truncate_middle_of_long_title(self):
+        """Test middle truncation for very long titles."""
+        text = "Artist - This is an extremely long song title that should be truncated from the middle"
+        result = ytmpd_status.smart_truncate(text, 50)
+        assert len(result) <= 50
+        assert "Artist" in result
+        assert "…" in result
+        # Should truncate from middle
+        assert result.startswith("Artist - ")
+
+    def test_truncate_short_title(self):
+        """Test truncation of shorter title from end."""
+        text = "Artist Name - Short Title Here"
+        result = ytmpd_status.smart_truncate(text, 20)
+        assert len(result) <= 20
+        assert "Artist" in result
+        assert "…" in result
+
+    def test_very_long_artist_name(self):
+        """Test truncation when artist name itself is too long."""
+        text = "Very Long Artist Name That Exceeds Length - Song"
+        result = ytmpd_status.smart_truncate(text, 30)
+        assert len(result) <= 30
+        assert result.endswith("…")
+
+    def test_proper_ellipsis_character(self):
+        """Test that proper ellipsis character (…) is used."""
+        text = "A" * 100
+        result = ytmpd_status.smart_truncate(text, 20)
+        assert "…" in result
+        assert "..." not in result  # Should not use three dots
+
+
+class TestContextAwareMessaging:
+    """Test context-aware messaging in output."""
+
+    @patch("ytmpd_status.get_mpd_client")
+    @patch("ytmpd_status.get_track_type")
+    @patch("ytmpd_status.get_playlist_context")
+    @patch("ytmpd_status.get_sync_status")
+    def test_unresolved_youtube_track(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
+        """Test 'Resolving...' message for unresolved YouTube track."""
+        mock_mpd = MagicMock()
+        mock_client.return_value = mock_mpd
+        mock_mpd.status.return_value = {
+            "state": "play",
+            "elapsed": "30",
+            "duration": "180",
+        }
+        mock_mpd.currentsong.return_value = {
+            "title": "Test Song",
+            "artist": "Test Artist",
+            "file": "http://localhost:6602/proxy/test123",
+        }
+        mock_track.return_value = "youtube"
+        mock_ctx.return_value = {"current_pos": None, "total": None, "next": None, "prev": None}
+        mock_sync.return_value = "unresolved"
+
+        ytmpd_status.main()
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        assert "[Resolving...]" in lines[0]
+
+    @patch("ytmpd_status.get_mpd_client")
+    @patch("ytmpd_status.get_track_type")
+    @patch("ytmpd_status.get_playlist_context")
+    @patch("ytmpd_status.get_sync_status")
+    def test_first_track_position(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
+        """Test position display for first track."""
+        mock_mpd = MagicMock()
+        mock_client.return_value = mock_mpd
+        mock_mpd.status.return_value = {
+            "state": "play",
+            "elapsed": "30",
+            "duration": "180",
+        }
+        mock_mpd.currentsong.return_value = {
+            "title": "Test Song",
+            "artist": "Test Artist",
+            "file": "/music/song.mp3",
+        }
+        mock_track.return_value = "local"
+        mock_ctx.return_value = {"current_pos": 1, "total": 25, "next": {}, "prev": None}
+        mock_sync.return_value = "local"
+
+        ytmpd_status.main()
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        assert "[1/25]" in lines[0]
+
+    @patch("ytmpd_status.get_mpd_client")
+    @patch("ytmpd_status.get_track_type")
+    @patch("ytmpd_status.get_playlist_context")
+    @patch("ytmpd_status.get_sync_status")
+    def test_last_track_position(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
+        """Test position display for last track."""
+        mock_mpd = MagicMock()
+        mock_client.return_value = mock_mpd
+        mock_mpd.status.return_value = {
+            "state": "play",
+            "elapsed": "30",
+            "duration": "180",
+        }
+        mock_mpd.currentsong.return_value = {
+            "title": "Test Song",
+            "artist": "Test Artist",
+            "file": "/music/song.mp3",
+        }
+        mock_track.return_value = "local"
+        mock_ctx.return_value = {"current_pos": 25, "total": 25, "next": None, "prev": {}}
+        mock_sync.return_value = "local"
+
+        ytmpd_status.main()
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        assert "[25/25]" in lines[0]
+
+    @patch("ytmpd_status.get_mpd_client")
+    @patch("ytmpd_status.get_track_type")
+    @patch("ytmpd_status.get_playlist_context")
+    @patch("ytmpd_status.get_sync_status")
+    def test_single_track_playlist(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
+        """Test position display for single track playlist."""
+        mock_mpd = MagicMock()
+        mock_client.return_value = mock_mpd
+        mock_mpd.status.return_value = {
+            "state": "play",
+            "elapsed": "30",
+            "duration": "180",
+        }
+        mock_mpd.currentsong.return_value = {
+            "title": "Test Song",
+            "artist": "Test Artist",
+            "file": "/music/song.mp3",
+        }
+        mock_track.return_value = "local"
+        mock_ctx.return_value = {"current_pos": 1, "total": 1, "next": None, "prev": None}
+        mock_sync.return_value = "local"
+
+        ytmpd_status.main()
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        assert "[1/1]" in lines[0]
+
+
+class TestCompactMode:
+    """Test compact mode functionality."""
+
+    @patch.dict("os.environ", {"YTMPD_STATUS_COMPACT": "true"})
+    @patch("ytmpd_status.get_mpd_client")
+    @patch("ytmpd_status.get_track_type")
+    @patch("ytmpd_status.get_playlist_context")
+    @patch("ytmpd_status.get_sync_status")
+    def test_compact_mode_output(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
+        """Test that compact mode produces minimal output."""
+        mock_mpd = MagicMock()
+        mock_client.return_value = mock_mpd
+        mock_mpd.status.return_value = {
+            "state": "play",
+            "elapsed": "30",
+            "duration": "180",
+        }
+        mock_mpd.currentsong.return_value = {
+            "title": "Test Song",
+            "artist": "Test Artist",
+            "file": "/music/song.mp3",
+        }
+        mock_track.return_value = "local"
+        mock_ctx.return_value = {"current_pos": None, "total": None, "next": None, "prev": None}
+        mock_sync.return_value = "local"
+
+        ytmpd_status.main()
+
+        captured = capsys.readouterr()
+        lines = captured.out.strip().split("\n")
+        output = lines[0]
+
+        # Should have icon, artist, and title
+        assert "▶" in output
+        assert "Test Artist" in output
+        assert "Test Song" in output
+
+        # Should NOT have time or progress bar
+        assert "[" not in output  # No brackets for time
+        assert "0:30" not in output
+        assert "3:00" not in output
+
+
+class TestNextPrevDisplay:
+    """Test next/previous track display."""
+
+    @patch.dict("os.environ", {"YTMPD_STATUS_SHOW_NEXT": "true"})
+    @patch("ytmpd_status.get_mpd_client")
+    @patch("ytmpd_status.get_track_type")
+    @patch("ytmpd_status.get_playlist_context")
+    @patch("ytmpd_status.get_sync_status")
+    def test_show_next_track(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
+        """Test next track display when enabled."""
+        mock_mpd = MagicMock()
+        mock_client.return_value = mock_mpd
+        mock_mpd.status.return_value = {
+            "state": "play",
+            "elapsed": "30",
+            "duration": "180",
+        }
+        mock_mpd.currentsong.return_value = {
+            "title": "Current Song",
+            "artist": "Current Artist",
+            "file": "/music/song.mp3",
+        }
+        mock_track.return_value = "local"
+        mock_ctx.return_value = {
+            "current_pos": 5,
+            "total": 10,
+            "next": {"artist": "Next Artist", "title": "Next Song"},
+            "prev": None
+        }
+        mock_sync.return_value = "local"
+
+        ytmpd_status.main()
+
+        captured = capsys.readouterr()
+        output = captured.out
+
+        # Should have next track info
+        assert "↓" in output
+        assert "Next Artist" in output
+        assert "Next Song" in output
+
+    @patch.dict("os.environ", {"YTMPD_STATUS_SHOW_PREV": "true"})
+    @patch("ytmpd_status.get_mpd_client")
+    @patch("ytmpd_status.get_track_type")
+    @patch("ytmpd_status.get_playlist_context")
+    @patch("ytmpd_status.get_sync_status")
+    def test_show_prev_track(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
+        """Test previous track display when enabled."""
+        mock_mpd = MagicMock()
+        mock_client.return_value = mock_mpd
+        mock_mpd.status.return_value = {
+            "state": "play",
+            "elapsed": "30",
+            "duration": "180",
+        }
+        mock_mpd.currentsong.return_value = {
+            "title": "Current Song",
+            "artist": "Current Artist",
+            "file": "/music/song.mp3",
+        }
+        mock_track.return_value = "local"
+        mock_ctx.return_value = {
+            "current_pos": 5,
+            "total": 10,
+            "next": None,
+            "prev": {"artist": "Prev Artist", "title": "Prev Song"}
+        }
+        mock_sync.return_value = "local"
+
+        ytmpd_status.main()
+
+        captured = capsys.readouterr()
+        output = captured.out
+
+        # Should have prev track info
+        assert "↑" in output
+        assert "Prev Artist" in output
+        assert "Prev Song" in output

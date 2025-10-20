@@ -14,16 +14,16 @@
 ---
 
 **Last Updated:** 2025-10-20
-**Current Phase:** 3 of 7
-**Phase Name:** Playlist Context & Sync Status
-**Progress:** 29% (2/7 phases complete)
+**Current Phase:** 4 of 7
+**Phase Name:** Integration Testing
+**Progress:** 43% (3/7 phases complete)
 
 ---
 
 ## Progress Bar
 
 ```
-[██████░░░░░░░░░░░░░░] 29% (2/7)
+[█████████░░░░░░░░░░░] 43% (3/7)
 ```
 
 ---
@@ -34,8 +34,8 @@
 |-------|------|--------|
 | 1 | Core MPD Status Display | ✅ Complete |
 | 2 | Progress Bar Implementation | ✅ Complete |
-| 3 | Playlist Context & Sync Status | 🔵 CURRENT |
-| 4 | Integration Testing | ⏳ Pending |
+| 3 | Playlist Context & Sync Status | ✅ Complete |
+| 4 | Integration Testing | 🔵 CURRENT |
 | 5 | CLI Arguments & Configuration | ⏳ Pending |
 | 6 | i3blocks Integration & Idle Mode | ⏳ Pending |
 | 7 | Testing, Scrolling & Polish | ⏳ Pending |
@@ -44,27 +44,27 @@
 
 ## Instructions for Agents
 
-### Current Phase: Phase 3
+### Current Phase: Phase 4
 
 1. **Verify location**: `pwd` → `/home/tunc/Sync/Programs/ytmpd`
 2. **Verify git branch**: `git branch` → `* feature/i3blocks-status`
 3. **Activate environment**: `source .venv/bin/activate`
-4. Read `PROJECT_PLAN.md` - Phase 3 section only
-5. Read Phase 2 summary: `summaries/PHASE_02_SUMMARY.md`
+4. Read `PROJECT_PLAN.md` - Phase 4 section only
+5. Read Phase 3 summary: `summaries/PHASE_03_SUMMARY.md`
 6. Complete the phase following the completion criteria
-7. Create `summaries/PHASE_03_SUMMARY.md`
+7. Create `summaries/PHASE_04_SUMMARY.md`
 8. Update this file:
-   - Mark Phase 3 as ✅ Complete
-   - Set Phase 4 as 🔵 CURRENT
-   - Update "Current Phase" to "4 of 7"
-   - Update "Phase Name" to "Integration Testing"
-   - Update "Progress" to "43% (3/7 phases complete)"
-   - Update progress bar: `[█████████░░░░░░░░░░░] 43% (3/7)`
+   - Mark Phase 4 as ✅ Complete
+   - Set Phase 5 as 🔵 CURRENT
+   - Update "Current Phase" to "5 of 7"
+   - Update "Phase Name" to "CLI Arguments & Configuration"
+   - Update "Progress" to "57% (4/7 phases complete)"
+   - Update progress bar: `[████████████░░░░░░░░] 57% (4/7)`
 9. **Stage changes**: `git add -A && git status`
 10. **WAIT for user confirmation before committing**
 11. Commit with clean message (no AI/Claude references)
 
-**Full details:** See `PROJECT_PLAN.md` Phase 3
+**Full details:** See `PROJECT_PLAN.md` Phase 4
 
 ---
 
@@ -102,3 +102,13 @@
 - Added 4 environment variables for bar configuration
 - All 54 tests passing (26 from Phase 1 + 28 new)
 - Manual testing verified bar updates correctly with live playback
+
+**Phase 3 Completed:**
+- Implemented playlist context retrieval (position, next/prev tracks)
+- Added sync status checking for YouTube tracks (resolved/unresolved)
+- Created smart truncation preserving artist names with proper ellipsis (…)
+- Built context-aware messaging ([Resolving...], position indicators)
+- Added next/previous track display (optional via environment variables)
+- Implemented compact mode for minimal output
+- All 79 tests passing (54 from Phases 1 & 2 + 25 new)
+- Manual testing verified all features with live MPD instance
