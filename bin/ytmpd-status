@@ -38,7 +38,7 @@ from pathlib import Path
 
 from mpd import MPDClient, ConnectionError as MPDConnectionError
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 
 def get_mpd_client(host: str = "localhost", port: int = 6601) -> MPDClient | None:
