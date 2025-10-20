@@ -4,7 +4,7 @@
 This script queries MPD status and formats it for i3blocks display,
 with special handling for YouTube-streamed vs local tracks.
 
-Environment Variables:
+Environment Variables (deprecated - use CLI args instead):
     YTMPD_STATUS_MAX_LENGTH: Maximum length before truncation (default: 50)
     YTMPD_STATUS_BAR_LENGTH: Progress bar length in characters (default: 10)
     YTMPD_STATUS_SHOW_BAR: Enable/disable progress bar (default: true)
@@ -27,12 +27,16 @@ Color Codes (for i3blocks):
     Stopped: #808080 (gray)
 """
 
+import argparse
 import os
+import re
 import sqlite3
 import sys
 from pathlib import Path
 
 from mpd import MPDClient, ConnectionError as MPDConnectionError
+
+__version__ = "2.0.0"
 
 
 def get_mpd_client(host: str = "localhost", port: int = 6601) -> MPDClient | None:
@@ -353,25 +357,330 @@ def smart_truncate(text: str, max_length: int) -> str:
         return f"{artist} - {truncated_title}"
 
 
+def validate_color(color: str) -> str:
+    """Validate hex color format.
+
+    Args:
+        color: Color string to validate (e.g., "#FF6B35").
+
+    Returns:
+        Validated color string.
+
+    Raises:
+        argparse.ArgumentTypeError: If color format is invalid.
+    """
+    if not re.match(r"^#[0-9A-Fa-f]{6}$", color):
+        raise argparse.ArgumentTypeError(
+            f"Invalid color format: {color}. Expected format: #RRGGBB"
+        )
+    return color
+
+
+def validate_port(value: str) -> int:
+    """Validate port number.
+
+    Args:
+        value: Port number as string.
+
+    Returns:
+        Validated port as int.
+
+    Raises:
+        argparse.ArgumentTypeError: If port is out of range.
+    """
+    try:
+        port = int(value)
+        if not 1 <= port <= 65535:
+            raise ValueError
+        return port
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid port: {value}. Must be between 1 and 65535"
+        )
+
+
+def validate_positive_int(value: str, min_val: int, max_val: int, name: str) -> int:
+    """Validate positive integer within range.
+
+    Args:
+        value: Value as string.
+        min_val: Minimum allowed value.
+        max_val: Maximum allowed value.
+        name: Name of parameter for error message.
+
+    Returns:
+        Validated integer.
+
+    Raises:
+        argparse.ArgumentTypeError: If value is out of range.
+    """
+    try:
+        val = int(value)
+        if not min_val <= val <= max_val:
+            raise ValueError
+        return val
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"Invalid {name}: {value}. Must be between {min_val} and {max_val}"
+        )
+
+
+def parse_arguments() -> argparse.Namespace:
+    """Parse command-line arguments with backward compatibility for env vars.
+
+    Returns:
+        Parsed arguments namespace.
+    """
+    parser = argparse.ArgumentParser(
+        prog="ytmpd-status",
+        description="Display ytmpd/MPD status for i3blocks with YouTube track detection",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Format String Placeholders:
+  {icon}      - Playback status icon (▶, ⏸, ⏹)
+  {artist}    - Track artist
+  {title}     - Track title
+  {album}     - Album name
+  {elapsed}   - Elapsed time (formatted as M:SS)
+  {duration}  - Total duration (formatted as M:SS)
+  {bar}       - Progress bar
+  {position}  - Current track position in playlist
+  {total}     - Total tracks in playlist
+  {next}      - Next track (if available)
+  {prev}      - Previous track (if available)
+
+Examples:
+  ytmpd-status
+  ytmpd-status --compact --no-show-bar
+  ytmpd-status --format "{icon} {title} ({elapsed}/{duration})"
+  ytmpd-status --bar-length 15 --show-next
+  ytmpd-status --host localhost --port 6600
+        """,
+    )
+
+    # Version
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+
+    # Connection options
+    conn_group = parser.add_argument_group("Connection Options")
+    conn_group.add_argument(
+        "--host",
+        default=os.environ.get("YTMPD_STATUS_HOST", "localhost"),
+        help="MPD server host (default: localhost)",
+    )
+    conn_group.add_argument(
+        "--port",
+        type=validate_port,
+        default=int(os.environ.get("YTMPD_STATUS_PORT", "6601")),
+        help="MPD server port (default: 6601)",
+    )
+
+    # Display options
+    display_group = parser.add_argument_group("Display Options")
+    display_group.add_argument(
+        "-l",
+        "--max-length",
+        type=lambda x: validate_positive_int(x, 1, 200, "max-length"),
+        default=int(os.environ.get("YTMPD_STATUS_MAX_LENGTH", "50")),
+        help="Maximum output length (default: 50)",
+    )
+    display_group.add_argument(
+        "-f",
+        "--format",
+        default=os.environ.get("YTMPD_STATUS_FORMAT", ""),
+        help="Custom format string (default: auto)",
+    )
+    display_group.add_argument(
+        "-c",
+        "--compact",
+        action="store_true",
+        default=os.environ.get("YTMPD_STATUS_COMPACT", "false").lower()
+        in ("true", "1", "yes"),
+        help="Use compact display mode",
+    )
+
+    # Progress bar options
+    bar_group = parser.add_argument_group("Progress Bar Options")
+    bar_group.add_argument(
+        "--show-bar",
+        action="store_true",
+        dest="show_bar",
+        default=None,
+        help="Enable progress bar (default)",
+    )
+    bar_group.add_argument(
+        "--no-show-bar",
+        action="store_false",
+        dest="show_bar",
+        help="Disable progress bar",
+    )
+    bar_group.add_argument(
+        "--bar-length",
+        type=lambda x: validate_positive_int(x, 1, 50, "bar-length"),
+        default=int(os.environ.get("YTMPD_STATUS_BAR_LENGTH", "10")),
+        help="Progress bar length in characters (default: 10)",
+    )
+    bar_group.add_argument(
+        "--bar-style",
+        choices=["blocks", "smooth", "simple", "auto"],
+        default=os.environ.get("YTMPD_STATUS_BAR_STYLE", "auto"),
+        help="Progress bar style (default: auto)",
+    )
+
+    # Playlist context options
+    playlist_group = parser.add_argument_group("Playlist Context Options")
+    playlist_group.add_argument(
+        "--show-next",
+        action="store_true",
+        default=os.environ.get("YTMPD_STATUS_SHOW_NEXT", "false").lower()
+        in ("true", "1", "yes"),
+        help="Show next track",
+    )
+    playlist_group.add_argument(
+        "--show-prev",
+        action="store_true",
+        default=os.environ.get("YTMPD_STATUS_SHOW_PREV", "false").lower()
+        in ("true", "1", "yes"),
+        help="Show previous track",
+    )
+    playlist_group.add_argument(
+        "--show-position",
+        action="store_true",
+        default=os.environ.get("YTMPD_STATUS_SHOW_POSITION", "false").lower()
+        in ("true", "1", "yes"),
+        help="Show playlist position",
+    )
+
+    # Color options
+    color_group = parser.add_argument_group("Color Options")
+    color_group.add_argument(
+        "--color-youtube-playing",
+        type=validate_color,
+        default=os.environ.get("YTMPD_STATUS_COLOR_YOUTUBE_PLAYING", "#FF6B35"),
+        help="Color for YouTube playing (default: #FF6B35)",
+    )
+    color_group.add_argument(
+        "--color-youtube-paused",
+        type=validate_color,
+        default=os.environ.get("YTMPD_STATUS_COLOR_YOUTUBE_PAUSED", "#FFB84D"),
+        help="Color for YouTube paused (default: #FFB84D)",
+    )
+    color_group.add_argument(
+        "--color-local-playing",
+        type=validate_color,
+        default=os.environ.get("YTMPD_STATUS_COLOR_LOCAL_PLAYING", "#00FF00"),
+        help="Color for local playing (default: #00FF00)",
+    )
+    color_group.add_argument(
+        "--color-local-paused",
+        type=validate_color,
+        default=os.environ.get("YTMPD_STATUS_COLOR_LOCAL_PAUSED", "#FFFF00"),
+        help="Color for local paused (default: #FFFF00)",
+    )
+    color_group.add_argument(
+        "--color-stopped",
+        type=validate_color,
+        default=os.environ.get("YTMPD_STATUS_COLOR_STOPPED", "#808080"),
+        help="Color for stopped (default: #808080)",
+    )
+
+    # Icon options
+    icon_group = parser.add_argument_group("Icon Options")
+    icon_group.add_argument(
+        "--icon-playing",
+        default=os.environ.get("YTMPD_STATUS_ICON_PLAYING", "▶"),
+        help="Icon for playing state (default: ▶)",
+    )
+    icon_group.add_argument(
+        "--icon-paused",
+        default=os.environ.get("YTMPD_STATUS_ICON_PAUSED", "⏸"),
+        help="Icon for paused state (default: ⏸)",
+    )
+    icon_group.add_argument(
+        "--icon-stopped",
+        default=os.environ.get("YTMPD_STATUS_ICON_STOPPED", "⏹"),
+        help="Icon for stopped state (default: ⏹)",
+    )
+
+    # Debug options
+    debug_group = parser.add_argument_group("Debug Options")
+    debug_group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose output (show connection info, etc.)",
+    )
+
+    args = parser.parse_args()
+
+    # Handle show_bar default (backward compatibility)
+    if args.show_bar is None:
+        # Not specified on CLI, check env var
+        args.show_bar = os.environ.get("YTMPD_STATUS_SHOW_BAR", "true").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
+    # Convert bar_style "auto" to empty string for consistency with old code
+    if args.bar_style == "auto":
+        args.bar_style = ""
+
+    return args
+
+
+def format_with_template(template: str, data: dict) -> str:
+    """Format output using template string with placeholders.
+
+    Args:
+        template: Format string with {placeholder} syntax.
+        data: Dictionary with placeholder values.
+
+    Returns:
+        Formatted string.
+    """
+    # Replace placeholders with values
+    output = template
+    for key, value in data.items():
+        placeholder = f"{{{key}}}"
+        if placeholder in output:
+            output = output.replace(placeholder, str(value) if value is not None else "")
+
+    return output
+
+
 def main() -> None:
     """Display MPD/ytmpd status for i3blocks."""
-    # Get configuration from environment
-    max_length = int(os.environ.get("YTMPD_STATUS_MAX_LENGTH", "50"))
-    bar_length = int(os.environ.get("YTMPD_STATUS_BAR_LENGTH", "10"))
-    show_bar = os.environ.get("YTMPD_STATUS_SHOW_BAR", "true").lower() in ("true", "1", "yes")
-    bar_style = os.environ.get("YTMPD_STATUS_BAR_STYLE", "")  # Empty means auto-detect
-    show_next = os.environ.get("YTMPD_STATUS_SHOW_NEXT", "false").lower() in ("true", "1", "yes")
-    show_prev = os.environ.get("YTMPD_STATUS_SHOW_PREV", "false").lower() in ("true", "1", "yes")
-    compact_mode = os.environ.get("YTMPD_STATUS_COMPACT", "false").lower() in ("true", "1", "yes")
+    # Parse arguments (with backward compatibility for env vars)
+    args = parse_arguments()
+
+    # Extract configuration from args
+    max_length = args.max_length
+    bar_length = args.bar_length
+    show_bar = args.show_bar
+    bar_style = args.bar_style
+    show_next = args.show_next
+    show_prev = args.show_prev
+    compact_mode = args.compact
+    custom_format = args.format
+
+    if args.verbose:
+        print(f"Connecting to MPD at {args.host}:{args.port}", file=sys.stderr)
 
     # Connect to MPD
-    client = get_mpd_client()
+    client = get_mpd_client(host=args.host, port=args.port)
 
     if client is None:
         # MPD not running
-        print("⏹ MPD stopped")
-        print("⏹ MPD stopped")  # Short text
-        print("#808080")  # Gray color
+        stop_icon = args.icon_stopped
+        stop_color = args.color_stopped
+        print(f"{stop_icon} MPD stopped")
+        print(f"{stop_icon} MPD stopped")  # Short text
+        print(stop_color)
         sys.exit(0)
 
     try:
@@ -382,9 +691,11 @@ def main() -> None:
         state = status.get("state", "stop")
 
         if state == "stop" or not current_song:
-            print("⏹ Stopped")
-            print("⏹ Stopped")  # Short text
-            print("#808080")  # Gray color
+            stop_icon = args.icon_stopped
+            stop_color = args.color_stopped
+            print(f"{stop_icon} Stopped")
+            print(f"{stop_icon} Stopped")  # Short text
+            print(stop_color)
             client.close()
             sys.exit(0)
 
@@ -406,20 +717,20 @@ def main() -> None:
 
         # Choose icon and color based on state and track type
         if state == "play":
-            icon = "▶"
+            icon = args.icon_playing
             if track_type == "youtube":
-                color = "#FF6B35"  # Orange for YouTube
+                color = args.color_youtube_playing
             else:
-                color = "#00FF00"  # Green for local
+                color = args.color_local_playing
         elif state == "pause":
-            icon = "⏸"
+            icon = args.icon_paused
             if track_type == "youtube":
-                color = "#FFB84D"  # Light orange for YouTube paused
+                color = args.color_youtube_paused
             else:
-                color = "#FFFF00"  # Yellow for local paused
+                color = args.color_local_paused
         else:
-            icon = "⏹"
-            color = "#808080"  # Gray for stopped
+            icon = args.icon_stopped
+            color = args.color_stopped
 
         # Get playlist context
         playlist_ctx = get_playlist_context(client)
@@ -427,8 +738,41 @@ def main() -> None:
         # Check sync status for YouTube tracks
         sync_status = get_sync_status(file_path)
 
+        # Check if using custom format string
+        if custom_format:
+            # Build progress bar if needed in format
+            progress_bar_str = ""
+            if "{bar}" in custom_format and show_bar:
+                try:
+                    elapsed_float = float(elapsed)
+                    duration_float = float(duration)
+                    if duration_float > 0:
+                        style = bar_style if bar_style else ("smooth" if track_type == "youtube" else "blocks")
+                        filled_blocks = calculate_progress(elapsed_float, duration_float, bar_length)
+                        progress_bar_str = render_progress_bar(filled_blocks, bar_length, style)
+                except (ValueError, TypeError):
+                    pass
+
+            # Prepare data for template
+            template_data = {
+                "icon": icon,
+                "artist": artist,
+                "title": title,
+                "album": current_song.get("album", ""),
+                "elapsed": position_str,
+                "duration": duration_str,
+                "bar": progress_bar_str,
+                "position": playlist_ctx["current_pos"] if playlist_ctx["current_pos"] else "",
+                "total": playlist_ctx["total"] if playlist_ctx["total"] else "",
+                "next": f"{playlist_ctx['next']['artist']} - {playlist_ctx['next']['title']}" if playlist_ctx["next"] else "",
+                "prev": f"{playlist_ctx['prev']['artist']} - {playlist_ctx['prev']['title']}" if playlist_ctx["prev"] else "",
+            }
+
+            # Format using template
+            output = format_with_template(custom_format, template_data)
+
         # Build output based on mode
-        if compact_mode:
+        elif compact_mode:
             # Compact mode: just icon, artist, and title
             output = f"{icon} {artist} - {title}"
         else:
@@ -505,9 +849,11 @@ def main() -> None:
 
     except Exception as e:
         # Unexpected error
-        print(f"⏹ Error: {e}")
-        print("⏹ Error")
-        print("#808080")
+        stop_icon = args.icon_stopped
+        stop_color = args.color_stopped
+        print(f"{stop_icon} Error: {e}")
+        print(f"{stop_icon} Error")
+        print(stop_color)
     finally:
         if client:
             client.close()

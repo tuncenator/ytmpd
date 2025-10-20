@@ -33,6 +33,10 @@ class TestIntegrationScenarios:
 
     def setup_method(self):
         """Set up test fixtures."""
+        # Mock sys.argv to prevent argparse from using actual command line args
+        self.argv_patcher = patch("sys.argv", ["ytmpd-status"])
+        self.argv_patcher.start()
+
         # Create temporary database
         self.temp_dir = tempfile.mkdtemp()
         self.db_path = Path(self.temp_dir) / ".config" / "ytmpd"
@@ -65,6 +69,9 @@ class TestIntegrationScenarios:
         # Restore original environment variables
         os.environ.clear()
         os.environ.update(self.original_env)
+
+        # Stop argv patcher
+        self.argv_patcher.stop()
 
     def _create_mock_mpd_client(self, status_dict: dict, currentsong_dict: dict,
                                  playlist_length: int = 10, position: int = 5):
@@ -616,6 +623,10 @@ class TestEnvironmentVariableIntegration:
 
     def setup_method(self):
         """Set up test fixtures."""
+        # Mock sys.argv to prevent argparse from using actual command line args
+        self.argv_patcher = patch("sys.argv", ["ytmpd-status"])
+        self.argv_patcher.start()
+
         # Create temporary database
         self.temp_dir = tempfile.mkdtemp()
         self.db_path = Path(self.temp_dir) / ".config" / "ytmpd"
@@ -648,6 +659,9 @@ class TestEnvironmentVariableIntegration:
         # Restore original environment variables
         os.environ.clear()
         os.environ.update(self.original_env)
+
+        # Stop argv patcher
+        self.argv_patcher.stop()
 
     @patch("ytmpd_status_integration.get_mpd_client")
     @patch("ytmpd_status_integration.Path.home")
