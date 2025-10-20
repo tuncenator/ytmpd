@@ -730,12 +730,13 @@ def handle_click(client: MPDClient, verbose: bool = False) -> bool:
         return False
 
 
-def display_status(client: MPDClient, args) -> None:
+def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
     """Display current MPD status once.
 
     Args:
         client: Connected MPD client.
         args: Parsed command-line arguments.
+        persist_mode: If True, output single line for i3blocks persist mode.
     """
     try:
         # Get current status and song
@@ -746,10 +747,15 @@ def display_status(client: MPDClient, args) -> None:
 
         if state == "stop" or not current_song:
             stop_icon = args.icon_stopped
-            stop_color = args.color_stopped
-            print(f"{stop_icon} Stopped")
-            print(f"{stop_icon} Stopped")  # Short text
-            print(stop_color)
+            stop_msg = f"{stop_icon} Stopped"
+            if persist_mode:
+                print(stop_msg)
+                sys.stdout.flush()
+            else:
+                print(stop_msg)
+                print(stop_msg)  # Short text
+                print(args.color_stopped)
+                sys.stdout.flush()
             return
 
         # Get song info
@@ -858,11 +864,16 @@ def display_status(client: MPDClient, args) -> None:
                         elapsed_float = float(elapsed)
                         duration_float = float(duration)
                         if duration_float > 0:
+                            # Auto-detect bar style based on track type if not specified
+                            if bar_style:
+                                style = bar_style
+                            else:
+                                style = "smooth" if track_type == "youtube" else "blocks"
                             filled_blocks = calculate_progress(
                                 elapsed_float, duration_float, bar_length
                             )
                             progress_bar_str = render_progress_bar(
-                                filled_blocks, bar_length, bar_style
+                                filled_blocks, bar_length, style
                             )
                             output += f" {progress_bar_str}"
                     except (ValueError, TypeError):
@@ -908,17 +919,28 @@ def display_status(client: MPDClient, args) -> None:
         else:
             full_output = output
 
-        print(full_output)  # Full text (may include next/prev)
-        print(output)  # Short text (just main line)
-        print(color)  # Color
+        if persist_mode:
+            # Persist mode: only output one line
+            print(output)
+            sys.stdout.flush()
+        else:
+            # Interval mode: output full_text, short_text, color
+            print(full_output)  # Full text (may include next/prev)
+            print(output)  # Short text (just main line)
+            print(color)  # Color
+            sys.stdout.flush()
 
     except Exception as e:
         # Unexpected error
         stop_icon = args.icon_stopped
-        stop_color = args.color_stopped
-        print(f"{stop_icon} Error: {e}")
-        print(f"{stop_icon} Error")
-        print(stop_color)
+        if persist_mode:
+            print(f"{stop_icon} Error")
+            sys.stdout.flush()
+        else:
+            print(f"{stop_icon} Error: {e}")
+            print(f"{stop_icon} Error")
+            print(args.color_stopped)
+            sys.stdout.flush()
 
 
 def run_idle_mode(args) -> None:
@@ -968,11 +990,13 @@ def run_idle_mode(args) -> None:
 
             # Check for click events
             if args.handle_clicks:
-                if handle_click(client, args.verbose):
-                    # Click handled, display updated status
-                    display_status(client, args)
-                    # Clear BLOCK_BUTTON to prevent re-handling
-                    os.environ.pop("BLOCK_BUTTON", None)
+                block_button = os.environ.get("BLOCK_BUTTON", "")
+                if block_button:
+                    if handle_click(client, args.verbose):
+                        # Click handled, display updated status
+                        display_status(client, args, persist_mode=True)
+                        # Clear BLOCK_BUTTON to prevent re-handling
+                        os.environ.pop("BLOCK_BUTTON", None)
                     continue
 
             # Check if manual refresh requested
@@ -980,21 +1004,15 @@ def run_idle_mode(args) -> None:
                 should_refresh = False
                 if args.verbose:
                     print("Manual refresh triggered", file=sys.stderr)
-                display_status(client, args)
+                display_status(client, args, persist_mode=True)
                 continue
 
             # Display current status
-            display_status(client, args)
+            display_status(client, args, persist_mode=True)
 
-            # Wait for MPD changes (this blocks until something changes)
-            if args.verbose:
-                print("Waiting for MPD changes...", file=sys.stderr)
-
-            # Use idle with timeout so we can check signals periodically
-            changed = client.idle(["player"])
-
-            if args.verbose:
-                print(f"MPD change detected: {changed}", file=sys.stderr)
+            # Sleep for 1 second to update progress bar during playback
+            # This is simpler than trying to use MPD's idle with timeout
+            time.sleep(1)
 
         except (
             MPDConnectionError,
@@ -1099,6 +1117,7 @@ def main() -> None:
             print(f"{stop_icon} Stopped")
             print(f"{stop_icon} Stopped")  # Short text
             print(stop_color)
+            sys.stdout.flush()
             client.close()
             sys.exit(0)
 
@@ -1264,24 +1283,26 @@ def main() -> None:
             next_line = smart_truncate(next_line, max_length)
             additional_lines.append(next_line)
 
-        # Output for i3blocks
+        # Output for i3blocks (interval mode - always 3-line format)
         # If we have additional lines, append them to the full text
         if additional_lines:
             full_output = output + "\n" + "\n".join(additional_lines)
         else:
             full_output = output
 
+        # Interval mode: output full_text, short_text, color
         print(full_output)  # Full text (may include next/prev)
         print(output)  # Short text (just main line)
         print(color)  # Color
+        sys.stdout.flush()
 
     except Exception as e:
-        # Unexpected error
+        # Unexpected error (interval mode)
         stop_icon = args.icon_stopped
-        stop_color = args.color_stopped
         print(f"{stop_icon} Error: {e}")
         print(f"{stop_icon} Error")
-        print(stop_color)
+        print(args.color_stopped)
+        sys.stdout.flush()
     finally:
         if client:
             client.close()
