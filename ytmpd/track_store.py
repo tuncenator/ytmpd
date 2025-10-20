@@ -6,6 +6,7 @@ by the ICY proxy server to lookup metadata when serving proxied streams to MPD.
 """
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,10 @@ class TrackStore:
         # Allow multi-threaded access (proxy server runs in async thread)
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Enable dict-like access
+
+        # Thread lock to serialize database writes
+        self._lock = threading.Lock()
+
         self._create_schema()
 
     def _create_schema(self) -> None:
@@ -105,19 +110,22 @@ class TrackStore:
             When stream_url is None, the track is saved with metadata only.
             The proxy server will resolve the URL on-demand when the track is played.
         """
-        with self.conn:
-            self.conn.execute(
-                """
-                INSERT INTO tracks (video_id, stream_url, artist, title, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(video_id) DO UPDATE SET
-                    stream_url = excluded.stream_url,
-                    artist = excluded.artist,
-                    title = excluded.title,
-                    updated_at = excluded.updated_at
-                """,
-                (video_id, stream_url, artist, title, time.time())
-            )
+        with self._lock:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    INSERT INTO tracks (video_id, stream_url, artist, title, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(video_id) DO UPDATE SET
+                        stream_url = CASE WHEN excluded.stream_url IS NOT NULL
+                                          THEN excluded.stream_url
+                                          ELSE stream_url END,
+                        artist = excluded.artist,
+                        title = excluded.title,
+                        updated_at = excluded.updated_at
+                    """,
+                    (video_id, stream_url, artist, title, time.time())
+                )
 
     def get_track(self, video_id: str) -> dict[str, Any] | None:
         """Retrieve track metadata by video_id.
@@ -164,15 +172,16 @@ class TrackStore:
             the database (no rows will be affected). Use get_track() first
             to check if a track exists.
         """
-        with self.conn:
-            self.conn.execute(
-                """
-                UPDATE tracks
-                SET stream_url = ?, updated_at = ?
-                WHERE video_id = ?
-                """,
-                (stream_url, time.time(), video_id)
-            )
+        with self._lock:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE tracks
+                    SET stream_url = ?, updated_at = ?
+                    WHERE video_id = ?
+                    """,
+                    (stream_url, time.time(), video_id)
+                )
 
     def close(self) -> None:
         """Close database connection.

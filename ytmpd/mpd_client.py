@@ -403,6 +403,19 @@ class MPDClient:
                 f"Unexpected error adding to playlist '{name}': {e}"
             ) from e
 
+    def currentsong(self) -> dict[str, str]:
+        """Get the currently playing song from MPD.
+
+        Returns:
+            Dictionary with song info (file, title, artist, etc).
+            Returns empty dict if no song is playing.
+
+        Raises:
+            MPDConnectionError: If not connected to MPD.
+        """
+        self._ensure_connected()
+        return self._client.currentsong()
+
     def _ensure_connected(self) -> None:
         """Ensure we're connected to MPD, reconnect if needed.
 

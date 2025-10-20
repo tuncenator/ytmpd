@@ -198,7 +198,8 @@ class StreamResolver:
         ydl_opts = {
             # Prefer direct HTTPS URLs over HLS/DASH for proxy compatibility
             # Format priority: opus in webm (251) > m4a audio (140) > any audio
-            'format': 'bestaudio[protocol^=https][ext=webm]/bestaudio[protocol^=https]/bestaudio/best',
+            # Explicitly exclude HLS/DASH manifests (m3u8_native, dash protocols)
+            'format': 'bestaudio[protocol^=https][protocol!=m3u8_native][protocol!=http_dash_segments][ext=webm]/bestaudio[protocol^=https][protocol!=m3u8_native][protocol!=http_dash_segments]/bestaudio[protocol!=m3u8_native]/bestaudio/best',
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
@@ -207,6 +208,8 @@ class StreamResolver:
             'skip_download': True,
             # Prefer non-HLS formats for direct streaming
             'prefer_free_formats': True,
+            # Use Android client to get direct URLs instead of HLS manifests
+            'extractor_args': {'youtube': {'player_client': ['android']}},
         }
 
         video_url = f'https://youtube.com/watch?v={video_id}'

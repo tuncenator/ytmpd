@@ -642,7 +642,7 @@ class YTMPDaemon:
             # If no video_id provided, extract from current MPD track
             if video_id is None:
                 try:
-                    current = self.mpd_client._client.currentsong()
+                    current = self.mpd_client.currentsong()
                 except Exception as e:
                     logger.error(f"Failed to get current song from MPD: {e}")
                     return {"success": False, "error": "Failed to get current track"}
@@ -688,22 +688,23 @@ class YTMPDaemon:
 
             logger.info(f"Fetched {len(video_ids)} tracks from radio playlist")
 
-            # Resolve stream URLs
-            logger.info(f"Resolving stream URLs for {len(video_ids)} tracks")
-            resolved = self.stream_resolver.resolve_batch(video_ids)
-
-            if not resolved:
-                return {"success": False, "error": "Failed to resolve any stream URLs"}
-
-            logger.info(f"Resolved {len(resolved)} of {len(video_ids)} tracks")
-
             # Build TrackWithMetadata objects for playlist creation
             from ytmpd.mpd_client import TrackWithMetadata
             track_objects = []
+
+            # Check if proxy is enabled for on-demand resolution
+            lazy_resolution = self.proxy_config and self.proxy_config.get("enabled", False)
+
+            if lazy_resolution:
+                logger.info(
+                    f"Proxy enabled - skipping URL resolution for {len(video_ids)} tracks "
+                    f"(will resolve on-demand when played)"
+                )
+
             for track in tracks:
                 if isinstance(track, dict):
                     vid = track.get("videoId")
-                    if vid and vid in resolved:
+                    if vid and vid in video_ids:
                         # Extract artist info
                         artists = track.get("artists", [])
                         if isinstance(artists, list) and artists:
@@ -711,12 +712,28 @@ class YTMPDaemon:
                         else:
                             artist = "Unknown Artist"
 
+                        title = track.get("title", "Unknown Title")
+                        duration_seconds = track.get("duration_seconds")
+
+                        # Save track metadata to TrackStore for on-demand resolution
+                        if lazy_resolution and self.track_store:
+                            try:
+                                self.track_store.add_track(
+                                    video_id=vid,
+                                    stream_url=None,  # Will be resolved on-demand by proxy
+                                    title=title,
+                                    artist=artist,
+                                )
+                                logger.debug(f"Saved track metadata for lazy resolution: {vid}")
+                            except Exception as e:
+                                logger.warning(f"Failed to save track metadata for {vid}: {e}")
+
                         track_objects.append(TrackWithMetadata(
-                            url=resolved[vid],
-                            title=track.get("title", "Unknown Title"),
+                            url="",  # Empty URL, proxy URL will be generated in create_or_replace_playlist
+                            title=title,
                             artist=artist,
                             video_id=vid,
-                            duration_seconds=track.get("duration_seconds")
+                            duration_seconds=duration_seconds
                         ))
 
             if not track_objects:
