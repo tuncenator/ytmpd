@@ -261,6 +261,193 @@ def cmd_list_playlists() -> None:
     print(colorize('  mpc load "YT: <playlist-name>"', "blue"))
 
 
+def cmd_search() -> None:
+    """Interactive search workflow for YouTube Music tracks."""
+    try:
+        # Step 1: Get search query
+        print("Search YouTube Music:")
+        query = input("> ").strip()
+
+        if not query:
+            print("Empty query. Exiting.")
+            sys.exit(0)
+
+        # Step 2: Send search command to daemon
+        print(f"\nSearching for: {query}...")
+        result = send_command(f"search {query}")
+
+        if not result.get("success"):
+            error = result.get("error", "Unknown error")
+            print(colorize(f"✗ Search failed: {error}", "red"), file=sys.stderr)
+            sys.exit(1)
+
+        results = result.get("results", [])
+        if not results:
+            print("No results found.")
+            sys.exit(0)
+
+        # Step 3: Display results
+        print()
+        print(colorize(f"Search results for \"{query}\":", "bold"))
+        print()
+        for track in results:
+            number = track["number"]
+            title = track["title"]
+            artist = track["artist"]
+            duration = track["duration"]
+            print(f"  {number}. {title} - {artist} ({duration})")
+
+        # Step 4: Get track selection
+        print()
+        print(f"Enter number (1-{len(results)}), or 'q' to quit:")
+        selection = input("> ").strip().lower()
+
+        if selection == 'q':
+            print("Cancelled.")
+            sys.exit(0)
+
+        try:
+            track_num = int(selection)
+            if track_num < 1 or track_num > len(results):
+                print(f"Invalid selection. Must be between 1 and {len(results)}.", file=sys.stderr)
+                sys.exit(1)
+        except ValueError:
+            print("Invalid input. Must be a number or 'q'.", file=sys.stderr)
+            sys.exit(1)
+
+        selected_track = results[track_num - 1]
+
+        # Step 5: Display action menu
+        print()
+        print(colorize(f"Selected: {selected_track['title']} - {selected_track['artist']}", "bold"))
+        print()
+        print("Actions:")
+        print("  1. Play now")
+        print("  2. Add to queue")
+        print("  3. Start radio from this song")
+        print("  4. Cancel")
+        print()
+        print("Enter choice (1-4):")
+        action = input("> ").strip()
+
+        if action == '4':
+            print("Cancelled.")
+            sys.exit(0)
+
+        video_id = selected_track['video_id']
+
+        # Step 6: Execute action
+        if action == '1':
+            # Play now
+            print("\nPlaying track...")
+            resp = send_command(f"play {video_id}")
+            if resp.get("success"):
+                check = "✓" if has_unicode_support() else "OK"
+                message = resp.get("message", "Playing...")
+                print(colorize(f"{check} {message}", "green"))
+            else:
+                cross = "✗" if has_unicode_support() else "ERROR"
+                error = resp.get("error", "Failed to play")
+                print(colorize(f"{cross} Error: {error}", "red"), file=sys.stderr)
+                sys.exit(1)
+
+        elif action == '2':
+            # Add to queue
+            print("\nAdding to queue...")
+            resp = send_command(f"queue {video_id}")
+            if resp.get("success"):
+                check = "✓" if has_unicode_support() else "OK"
+                message = resp.get("message", "Added to queue.")
+                print(colorize(f"{check} {message}", "green"))
+            else:
+                cross = "✗" if has_unicode_support() else "ERROR"
+                error = resp.get("error", "Failed to add to queue")
+                print(colorize(f"{cross} Error: {error}", "red"), file=sys.stderr)
+                sys.exit(1)
+
+        elif action == '3':
+            # Start radio and apply
+            print("\nGenerating radio playlist...")
+            resp = send_command(f"radio {video_id}")
+            if resp.get("success"):
+                check = "✓" if has_unicode_support() else "OK"
+                tracks = resp.get("tracks", 0)
+                playlist = resp.get("playlist", "YT: Radio")
+                print(colorize(f"{check} Radio playlist created: {tracks} tracks", "green"))
+
+                # Automatically apply the radio playlist
+                print()
+                print("Applying radio playlist to MPD...")
+
+                # Load config to get MPD connection info
+                import yaml
+                config_path = Path.home() / ".config" / "ytmpd" / "config.yaml"
+                mpd_socket = None
+                mpd_port = 6600
+                mpd_host = "localhost"
+
+                try:
+                    if config_path.exists():
+                        with open(config_path) as f:
+                            config = yaml.safe_load(f)
+                            # Check for mpd_socket_path (can be Unix socket or host:port)
+                            socket_path = config.get("mpd_socket_path")
+                            if socket_path:
+                                if ":" in socket_path and not socket_path.startswith("/"):
+                                    # It's a host:port format
+                                    mpd_host, port_str = socket_path.split(":", 1)
+                                    mpd_port = int(port_str)
+                                else:
+                                    # It's a Unix socket path
+                                    mpd_socket = socket_path
+                            # Fallback to separate host/port fields
+                            elif "mpd_host" in config:
+                                mpd_host = config.get("mpd_host", "localhost")
+                                mpd_port = config.get("mpd_port", 6600)
+                except Exception as e:
+                    print(colorize(f"Warning: Could not load config: {e}", "yellow"), file=sys.stderr)
+
+                # Build mpc command
+                if mpd_socket:
+                    # Unix socket connection
+                    mpc_cmd = ["mpc", "-h", mpd_socket]
+                else:
+                    # TCP connection
+                    mpc_cmd = ["mpc", "-p", str(mpd_port)]
+
+                try:
+                    # Clear current playlist
+                    subprocess.run(mpc_cmd + ["clear"], check=True, capture_output=True)
+
+                    # Load radio playlist from music directory
+                    # XSPF playlists are in music dir, not playlist dir
+                    subprocess.run(mpc_cmd + ["load", "_youtube/YT: Radio.xspf"], check=True, capture_output=True)
+
+                    # Start playback
+                    subprocess.run(mpc_cmd + ["play"], check=True, capture_output=True)
+
+                    print(colorize(f"{check} Radio playlist loaded and playing!", "green"))
+                except subprocess.CalledProcessError as e:
+                    print(colorize(f"✗ Failed to apply radio playlist: {e}", "red"), file=sys.stderr)
+                    sys.exit(1)
+            else:
+                cross = "✗" if has_unicode_support() else "ERROR"
+                error = resp.get("error", "Failed to generate radio")
+                print(colorize(f"{cross} Error: {error}", "red"), file=sys.stderr)
+                sys.exit(1)
+
+        else:
+            print("Invalid choice. Must be 1-4.", file=sys.stderr)
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_radio(apply: bool = False) -> None:
     """Generate radio playlist from currently playing track.
 
@@ -358,6 +545,7 @@ def show_help() -> None:
   ytmpctl list-playlists    List YouTube Music playlists
   ytmpctl radio [--apply]   Generate radio playlist from current track
                             --apply: Automatically load and play the radio
+  ytmpctl search            Interactive search for YouTube Music tracks
   ytmpctl help              Show this help message
 
 {colorize("Playback Control:", "bold")}
@@ -423,6 +611,8 @@ def main() -> NoReturn:
         # Check for --apply flag
         apply = "--apply" in args
         cmd_radio(apply=apply)
+    elif command == "search":
+        cmd_search()
     elif command == "help" or command == "--help" or command == "-h":
         show_help()
     else:

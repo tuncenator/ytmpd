@@ -4,8 +4,10 @@ These tests verify basic functionality without complex mocking.
 Full integration tests are in Phase 8.
 """
 
+import json
 import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -102,3 +104,33 @@ class TestYtmpctlPythonSyntax:
             text=True,
         )
         assert result.returncode == 0, f"Syntax error in ytmpctl: {result.stderr}"
+
+
+class TestYtmpctlSearch:
+    """Tests for ytmpctl search command functionality."""
+
+    def test_search_help_includes_command(self):
+        """Test that help message includes search command."""
+        result = subprocess.run(
+            [str(YTMPCTL), "help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "search" in result.stdout.lower()
+        assert "interactive" in result.stdout.lower() or "youtube music" in result.stdout.lower()
+
+    def test_search_command_requires_daemon(self):
+        """Test that search command handles daemon not running gracefully."""
+        # Provide empty input to exit immediately
+        result = subprocess.run(
+            [str(YTMPCTL), "search"],
+            capture_output=True,
+            text=True,
+            input="\n",  # Empty query to exit
+        )
+        # Should either work (daemon running) or show daemon error
+        # Empty query should exit with code 0
+        if result.returncode != 0:
+            # If daemon not running, should show helpful error
+            assert "daemon" in result.stderr.lower() or "socket" in result.stderr.lower()

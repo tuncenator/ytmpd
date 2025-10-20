@@ -507,8 +507,8 @@ class YTMPDaemon:
                 video_id = parts[1] if len(parts) > 1 else None
                 response = self._cmd_radio(video_id)
             elif cmd == "search":
-                # Extract search query (rest of command after "search")
-                query = parts[1] if len(parts) > 1 else None
+                # Extract search query (everything after "search")
+                query = " ".join(parts[1:]) if len(parts) > 1 else None
                 response = self._cmd_search(query)
             elif cmd == "play":
                 # Extract video_id argument
