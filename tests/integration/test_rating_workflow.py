@@ -351,13 +351,16 @@ class TestSyncTrigger:
         ytmusic.set_track_rating("test_video_id", transition.new_state)
 
         # Verify we should trigger sync (new_state is LIKED)
-        should_sync = transition.new_state == RatingState.LIKED
+        should_sync = (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        )
         assert should_sync is True
 
-    def test_sync_not_triggered_after_dislike(self, mock_mpd, mock_ytmusic, mock_config):
-        """Test that sync is NOT triggered after disliking a song.
+    def test_sync_not_triggered_after_dislike_neutral(self, mock_mpd, mock_ytmusic, mock_config):
+        """Test that sync is NOT triggered after disliking a neutral song.
 
-        Disliked songs don't appear in playlists, so sync is not needed.
+        NEUTRAL -> DISLIKED: Song wasn't in Liked Songs, so no sync needed.
         """
         from ytmpd.rating import RatingState
         from ytmpd.ytmusic import YTMusicClient
@@ -371,12 +374,42 @@ class TestSyncTrigger:
         transition = rating_mgr.apply_action(current_rating, RatingAction.DISLIKE)
         ytmusic.set_track_rating("test_video_id", transition.new_state)
 
-        # Verify we should NOT trigger sync (new_state is DISLIKED)
-        should_sync = transition.new_state == RatingState.LIKED
+        # Verify we should NOT trigger sync (old_state is NEUTRAL, new_state is DISLIKED)
+        should_sync = (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        )
         assert should_sync is False
 
-    def test_sync_not_triggered_after_removing_like(self, mock_mpd, mock_ytmusic, mock_config):
-        """Test that sync is NOT triggered when removing a like (LIKED -> NEUTRAL)."""
+    def test_sync_triggered_after_dislike_liked(self, mock_mpd, mock_ytmusic, mock_config):
+        """Test that sync IS triggered when disliking a liked song.
+
+        LIKED -> DISLIKED: Song removed from Liked Songs, so sync needed.
+        """
+        from ytmpd.rating import RatingState
+        from ytmpd.ytmusic import YTMusicClient
+
+        mock_ytmusic.get_track_rating.return_value = RatingState.LIKED
+
+        ytmusic = YTMusicClient()
+        rating_mgr = RatingManager()
+
+        current_rating = ytmusic.get_track_rating("test_video_id")
+        transition = rating_mgr.apply_action(current_rating, RatingAction.DISLIKE)
+        ytmusic.set_track_rating("test_video_id", transition.new_state)
+
+        # Verify we should trigger sync (old_state is LIKED)
+        should_sync = (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        )
+        assert should_sync is True
+
+    def test_sync_triggered_after_removing_like(self, mock_mpd, mock_ytmusic, mock_config):
+        """Test that sync IS triggered when removing a like (LIKED -> NEUTRAL).
+
+        Song removed from Liked Songs, so sync needed.
+        """
         from ytmpd.rating import RatingState
         from ytmpd.ytmusic import YTMusicClient
 
@@ -389,9 +422,12 @@ class TestSyncTrigger:
         transition = rating_mgr.apply_action(current_rating, RatingAction.LIKE)
         ytmusic.set_track_rating("test_video_id", transition.new_state)
 
-        # Verify we should NOT trigger sync (new_state is NEUTRAL)
-        should_sync = transition.new_state == RatingState.LIKED
-        assert should_sync is False
+        # Verify we should trigger sync (old_state is LIKED)
+        should_sync = (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        )
+        assert should_sync is True
 
 
 class TestIntegrationWorkflow:

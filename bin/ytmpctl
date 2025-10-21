@@ -663,8 +663,11 @@ def cmd_like() -> None:
         else:
             print(f"{transition.user_message}: {artist} - {title}")
 
-        # Trigger immediate sync if liked (to update "Liked Songs" playlist)
-        if transition.new_state == RatingState.LIKED:
+        # Trigger immediate sync if Liked Songs playlist content changed
+        if (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        ):
             print("\nTriggering sync to update playlists...")
             result = send_command("sync")
             if result.get("success"):
@@ -719,6 +722,16 @@ def cmd_dislike() -> None:
             print(colorize(f"{cross} {transition.user_message}: {artist} - {title}", "red"))
         else:
             print(f"{transition.user_message}: {artist} - {title}")
+
+        # Trigger immediate sync if Liked Songs playlist content changed
+        if (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        ):
+            print("\nTriggering sync to update playlists...")
+            result = send_command("sync")
+            if result.get("success"):
+                print(colorize("Sync started in background", "green"))
 
     except YTMusicNotFoundError:
         cross = "✗" if has_unicode_support() else "ERROR"
