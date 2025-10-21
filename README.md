@@ -433,6 +433,72 @@ Enter choice (1-4):
 - During selection: Type 'q' to quit
 - Ctrl+C: Cancel at any prompt
 
+### Liking and Disliking Tracks
+
+ytmpd supports bidirectional sync for track ratings - you can like or dislike tracks from your MPD playback environment, and changes sync immediately to YouTube Music.
+
+**Commands:**
+```bash
+ytmpctl like              # Toggle like for currently playing track
+ytmpctl dislike           # Toggle dislike for currently playing track
+```
+
+**Toggle Behavior:**
+
+Both commands use toggle logic for a natural user experience:
+
+**Like command:**
+- Neutral track → Like (✓ ✓ Liked: Artist - Title)
+- Liked track → Neutral (Removed like: Artist - Title)
+- Disliked track → Like (✓ ✓ Liked: Artist - Title)
+
+**Dislike command:**
+- Neutral track → Dislike (✗ ✗ Disliked: Artist - Title)
+- Disliked track → Neutral (Removed dislike: Artist - Title)
+- Liked track → Dislike (✗ ✗ Disliked: Artist - Title)
+
+**Sync Behavior:**
+
+When you like a song, ytmpd immediately triggers a sync to update your playlists. The liked song will appear in your "Liked Songs" playlist in MPD after the next sync completes.
+
+**Example Usage:**
+```bash
+# Like the currently playing track
+$ ytmpctl like
+✓ ✓ Liked: Miles Davis - So What
+
+Triggering sync to update playlists...
+Sync started in background
+
+# Toggle the like off
+$ ytmpctl like
+Removed like: Miles Davis - So What
+
+# Dislike the track
+$ ytmpctl dislike
+✗ ✗ Disliked: Miles Davis - So What
+
+# Switch from dislike back to like
+$ ytmpctl like
+✓ ✓ Liked: Miles Davis - So What
+
+Triggering sync to update playlists...
+Sync started in background
+```
+
+**Requirements:**
+- MPD must be playing a YouTube Music track (synced via ytmpd)
+- YouTube Music authentication must be configured
+
+**Error Messages:**
+- "Error: No track currently playing" - Start playback first with `mpc play`
+- "Error: Current track is not a YouTube Music track" - Only works with synced YouTube tracks
+- "Error: Failed to update rating" - Check network connection and authentication
+
+**Known Limitation:**
+
+Due to a YouTube Music API limitation, disliked tracks appear as neutral when queried. This means pressing "dislike" twice will dislike the track twice instead of toggling off. You can press "like" to clear a dislike state if needed.
+
 ## i3 Integration
 
 ### i3 Keybindings
@@ -445,6 +511,10 @@ bindsym $mod+Shift+p exec --no-startup-id mpc toggle
 bindsym $mod+Shift+s exec --no-startup-id mpc stop
 bindsym $mod+Shift+n exec --no-startup-id mpc next
 bindsym $mod+Shift+b exec --no-startup-id mpc prev
+
+# Like/dislike track ratings
+bindsym $mod+plus exec --no-startup-id ytmpctl like
+bindsym $mod+minus exec --no-startup-id ytmpctl dislike
 
 # Refresh i3blocks after control
 bindsym $mod+Shift+p exec --no-startup-id killall -SIGUSR1 i3blocks

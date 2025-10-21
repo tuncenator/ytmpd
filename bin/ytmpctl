@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -288,7 +289,7 @@ def cmd_search() -> None:
 
         # Step 3: Display results
         print()
-        print(colorize(f"Search results for \"{query}\":", "bold"))
+        print(colorize(f'Search results for "{query}":', "bold"))
         print()
         for track in results:
             number = track["number"]
@@ -302,7 +303,7 @@ def cmd_search() -> None:
         print(f"Enter number (1-{len(results)}), or 'q' to quit:")
         selection = input("> ").strip().lower()
 
-        if selection == 'q':
+        if selection == "q":
             print("Cancelled.")
             sys.exit(0)
 
@@ -330,14 +331,14 @@ def cmd_search() -> None:
         print("Enter choice (1-4):")
         action = input("> ").strip()
 
-        if action == '4':
+        if action == "4":
             print("Cancelled.")
             sys.exit(0)
 
-        video_id = selected_track['video_id']
+        video_id = selected_track["video_id"]
 
         # Step 6: Execute action
-        if action == '1':
+        if action == "1":
             # Play now
             print("\nPlaying track...")
             resp = send_command(f"play {video_id}")
@@ -351,7 +352,7 @@ def cmd_search() -> None:
                 print(colorize(f"{cross} Error: {error}", "red"), file=sys.stderr)
                 sys.exit(1)
 
-        elif action == '2':
+        elif action == "2":
             # Add to queue
             print("\nAdding to queue...")
             resp = send_command(f"queue {video_id}")
@@ -365,14 +366,13 @@ def cmd_search() -> None:
                 print(colorize(f"{cross} Error: {error}", "red"), file=sys.stderr)
                 sys.exit(1)
 
-        elif action == '3':
+        elif action == "3":
             # Start radio and apply
             print("\nGenerating radio playlist...")
             resp = send_command(f"radio {video_id}")
             if resp.get("success"):
                 check = "✓" if has_unicode_support() else "OK"
                 tracks = resp.get("tracks", 0)
-                playlist = resp.get("playlist", "YT: Radio")
                 print(colorize(f"{check} Radio playlist created: {tracks} tracks", "green"))
 
                 # Automatically apply the radio playlist
@@ -381,10 +381,10 @@ def cmd_search() -> None:
 
                 # Load config to get MPD connection info
                 import yaml
+
                 config_path = Path.home() / ".config" / "ytmpd" / "config.yaml"
                 mpd_socket = None
                 mpd_port = 6600
-                mpd_host = "localhost"
 
                 try:
                     if config_path.exists():
@@ -395,17 +395,18 @@ def cmd_search() -> None:
                             if socket_path:
                                 if ":" in socket_path and not socket_path.startswith("/"):
                                     # It's a host:port format
-                                    mpd_host, port_str = socket_path.split(":", 1)
+                                    _, port_str = socket_path.split(":", 1)
                                     mpd_port = int(port_str)
                                 else:
                                     # It's a Unix socket path
                                     mpd_socket = socket_path
                             # Fallback to separate host/port fields
                             elif "mpd_host" in config:
-                                mpd_host = config.get("mpd_host", "localhost")
                                 mpd_port = config.get("mpd_port", 6600)
                 except Exception as e:
-                    print(colorize(f"Warning: Could not load config: {e}", "yellow"), file=sys.stderr)
+                    print(
+                        colorize(f"Warning: Could not load config: {e}", "yellow"), file=sys.stderr
+                    )
 
                 # Build mpc command
                 if mpd_socket:
@@ -421,14 +422,20 @@ def cmd_search() -> None:
 
                     # Load radio playlist from music directory
                     # XSPF playlists are in music dir, not playlist dir
-                    subprocess.run(mpc_cmd + ["load", "_youtube/YT: Radio.xspf"], check=True, capture_output=True)
+                    subprocess.run(
+                        mpc_cmd + ["load", "_youtube/YT: Radio.xspf"],
+                        check=True,
+                        capture_output=True,
+                    )
 
                     # Start playback
                     subprocess.run(mpc_cmd + ["play"], check=True, capture_output=True)
 
                     print(colorize(f"{check} Radio playlist loaded and playing!", "green"))
                 except subprocess.CalledProcessError as e:
-                    print(colorize(f"✗ Failed to apply radio playlist: {e}", "red"), file=sys.stderr)
+                    print(
+                        colorize(f"✗ Failed to apply radio playlist: {e}", "red"), file=sys.stderr
+                    )
                     sys.exit(1)
             else:
                 cross = "✗" if has_unicode_support() else "ERROR"
@@ -470,10 +477,10 @@ def cmd_radio(apply: bool = False) -> None:
 
             # Load config to get MPD connection info
             import yaml
+
             config_path = Path.home() / ".config" / "ytmpd" / "config.yaml"
             mpd_socket = None
             mpd_port = 6600
-            mpd_host = "localhost"
 
             try:
                 if config_path.exists():
@@ -484,14 +491,13 @@ def cmd_radio(apply: bool = False) -> None:
                         if socket_path:
                             if ":" in socket_path and not socket_path.startswith("/"):
                                 # It's a host:port format
-                                mpd_host, port_str = socket_path.split(":", 1)
+                                _, port_str = socket_path.split(":", 1)
                                 mpd_port = int(port_str)
                             else:
                                 # It's a Unix socket path
                                 mpd_socket = socket_path
                         # Fallback to separate host/port fields
                         elif "mpd_host" in config:
-                            mpd_host = config.get("mpd_host", "localhost")
                             mpd_port = config.get("mpd_port", 6600)
             except Exception as e:
                 print(colorize(f"Warning: Could not load config: {e}", "yellow"), file=sys.stderr)
@@ -510,7 +516,9 @@ def cmd_radio(apply: bool = False) -> None:
 
                 # Load radio playlist from music directory
                 # XSPF playlists are in music dir, not playlist dir
-                subprocess.run(mpc_cmd + ["load", "_youtube/YT: Radio.xspf"], check=True, capture_output=True)
+                subprocess.run(
+                    mpc_cmd + ["load", "_youtube/YT: Radio.xspf"], check=True, capture_output=True
+                )
 
                 # Start playback
                 subprocess.run(mpc_cmd + ["play"], check=True, capture_output=True)
@@ -523,7 +531,7 @@ def cmd_radio(apply: bool = False) -> None:
             print()
             print(f"Playlist '{playlist}' is ready in MPD.")
             print("To load and play:")
-            print(colorize(f'  mpc load "_youtube/YT: Radio.xspf"', "blue"))
+            print(colorize('  mpc load "_youtube/YT: Radio.xspf"', "blue"))
             print(colorize("  mpc play", "blue"))
             print()
             print("Or use:")
@@ -532,6 +540,215 @@ def cmd_radio(apply: bool = False) -> None:
         cross = "✗" if has_unicode_support() else "ERROR"
         error = result.get("error", "Unknown error")
         print(colorize(f"{cross} {error}", "red"), file=sys.stderr)
+        sys.exit(1)
+
+
+def get_mpd_connection_info() -> tuple[str | None, int]:
+    """Get MPD connection info from config.
+
+    Returns:
+        Tuple of (socket_path, port). socket_path is None if using TCP.
+    """
+    import yaml
+
+    config_path = Path.home() / ".config" / "ytmpd" / "config.yaml"
+    mpd_socket = None
+    mpd_port = 6600
+
+    try:
+        if config_path.exists():
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+                socket_path = config.get("mpd_socket_path")
+                if socket_path:
+                    if ":" in socket_path and not socket_path.startswith("/"):
+                        # It's a host:port format
+                        _, port_str = socket_path.split(":", 1)
+                        mpd_port = int(port_str)
+                    else:
+                        # It's a Unix socket path
+                        mpd_socket = socket_path
+                elif "mpd_host" in config:
+                    mpd_port = config.get("mpd_port", 6600)
+    except Exception:
+        pass  # Use defaults
+
+    return mpd_socket, mpd_port
+
+
+def get_current_track_from_mpd() -> tuple[str, str, str]:
+    """Get currently playing track from MPD.
+
+    Returns:
+        Tuple of (video_id, title, artist).
+
+    Raises:
+        SystemExit: If no track is playing or track is not from YouTube Music.
+    """
+    mpd_socket, mpd_port = get_mpd_connection_info()
+
+    # Build mpc command
+    if mpd_socket:
+        mpc_cmd = ["mpc", "-h", mpd_socket]
+    else:
+        mpc_cmd = ["mpc", "-p", str(mpd_port)]
+
+    try:
+        # Get current track file path
+        result = subprocess.run(
+            mpc_cmd + ["current", "-f", "%file%"], capture_output=True, text=True, check=True
+        )
+        file_path = result.stdout.strip()
+
+        if not file_path:
+            print("Error: No track currently playing", file=sys.stderr)
+            sys.exit(1)
+
+        # Extract video_id from proxy URL
+        # Format: http://localhost:6602/proxy/{video_id}
+        match = re.search(r"/proxy/([a-zA-Z0-9_-]+)", file_path)
+        if not match:
+            print("Error: Current track is not a YouTube Music track", file=sys.stderr)
+            sys.exit(1)
+
+        video_id = match.group(1)
+
+        # Get artist and title
+        result = subprocess.run(
+            mpc_cmd + ["current", "-f", "%artist%"], capture_output=True, text=True, check=True
+        )
+        artist = result.stdout.strip() or "Unknown Artist"
+
+        result = subprocess.run(
+            mpc_cmd + ["current", "-f", "%title%"], capture_output=True, text=True, check=True
+        )
+        title = result.stdout.strip() or "Unknown Title"
+
+        return video_id, title, artist
+
+    except subprocess.CalledProcessError:
+        print("Error: Failed to get current track from MPD", file=sys.stderr)
+        print("Make sure MPD is running and a track is playing", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_like() -> None:
+    """Toggle like for current track."""
+    try:
+        # Import here to avoid startup delay
+        from ytmpd.exceptions import YTMusicAPIError, YTMusicAuthError, YTMusicNotFoundError
+        from ytmpd.rating import RatingAction, RatingManager, RatingState
+        from ytmpd.ytmusic import YTMusicClient
+
+        # Get current track from MPD
+        video_id, title, artist = get_current_track_from_mpd()
+
+        # Initialize clients
+        ytmusic = YTMusicClient()
+        rating_mgr = RatingManager()
+
+        # Get current rating
+        current_rating = ytmusic.get_track_rating(video_id)
+
+        # Apply toggle logic
+        transition = rating_mgr.apply_action(current_rating, RatingAction.LIKE)
+
+        # Set new rating
+        ytmusic.set_track_rating(video_id, transition.new_state)
+
+        # Show user feedback
+        check = "✓" if has_unicode_support() else "OK"
+        if transition.new_state == RatingState.LIKED:
+            print(colorize(f"{check} {transition.user_message}: {artist} - {title}", "green"))
+        else:
+            print(f"{transition.user_message}: {artist} - {title}")
+
+        # Trigger immediate sync if Liked Songs playlist content changed
+        if (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        ):
+            print("\nTriggering sync to update playlists...")
+            result = send_command("sync")
+            if result.get("success"):
+                print(colorize("Sync started in background", "green"))
+
+    except YTMusicNotFoundError:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} Track not found in YouTube Music", "red"), file=sys.stderr)
+        sys.exit(1)
+    except YTMusicAuthError:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} Not authenticated with YouTube Music", "red"), file=sys.stderr)
+        print("Run: python -m ytmpd.ytmusic setup-browser", file=sys.stderr)
+        sys.exit(1)
+    except YTMusicAPIError as e:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} API error: {e}", "red"), file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} Unexpected error: {e}", "red"), file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_dislike() -> None:
+    """Toggle dislike for current track."""
+    try:
+        # Import here to avoid startup delay
+        from ytmpd.exceptions import YTMusicAPIError, YTMusicAuthError, YTMusicNotFoundError
+        from ytmpd.rating import RatingAction, RatingManager, RatingState
+        from ytmpd.ytmusic import YTMusicClient
+
+        # Get current track from MPD
+        video_id, title, artist = get_current_track_from_mpd()
+
+        # Initialize clients
+        ytmusic = YTMusicClient()
+        rating_mgr = RatingManager()
+
+        # Get current rating
+        current_rating = ytmusic.get_track_rating(video_id)
+
+        # Apply toggle logic
+        transition = rating_mgr.apply_action(current_rating, RatingAction.DISLIKE)
+
+        # Set new rating
+        ytmusic.set_track_rating(video_id, transition.new_state)
+
+        # Show user feedback
+        cross = "✗" if has_unicode_support() else "X"
+        if transition.new_state == RatingState.DISLIKED:
+            print(colorize(f"{cross} {transition.user_message}: {artist} - {title}", "red"))
+        else:
+            print(f"{transition.user_message}: {artist} - {title}")
+
+        # Trigger immediate sync if Liked Songs playlist content changed
+        if (
+            transition.new_state == RatingState.LIKED
+            or transition.current_state == RatingState.LIKED
+        ):
+            print("\nTriggering sync to update playlists...")
+            result = send_command("sync")
+            if result.get("success"):
+                print(colorize("Sync started in background", "green"))
+
+    except YTMusicNotFoundError:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} Track not found in YouTube Music", "red"), file=sys.stderr)
+        sys.exit(1)
+    except YTMusicAuthError:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} Not authenticated with YouTube Music", "red"), file=sys.stderr)
+        print("Run: python -m ytmpd.ytmusic setup-browser", file=sys.stderr)
+        sys.exit(1)
+    except YTMusicAPIError as e:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} API error: {e}", "red"), file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        cross = "✗" if has_unicode_support() else "ERROR"
+        print(colorize(f"{cross} Unexpected error: {e}", "red"), file=sys.stderr)
         sys.exit(1)
 
 
@@ -546,6 +763,8 @@ def show_help() -> None:
   ytmpctl radio [--apply]   Generate radio playlist from current track
                             --apply: Automatically load and play the radio
   ytmpctl search            Interactive search for YouTube Music tracks
+  ytmpctl like              Toggle like for current track
+  ytmpctl dislike           Toggle dislike for current track
   ytmpctl help              Show this help message
 
 {colorize("Playback Control:", "bold")}
@@ -613,6 +832,10 @@ def main() -> NoReturn:
         cmd_radio(apply=apply)
     elif command == "search":
         cmd_search()
+    elif command == "like":
+        cmd_like()
+    elif command == "dislike":
+        cmd_dislike()
     elif command == "help" or command == "--help" or command == "-h":
         show_help()
     else:

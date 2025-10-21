@@ -125,11 +125,47 @@ planning, implementation, testing, and documentation across 9 development phases
 
 ## [Unreleased]
 
+### Added
+
+#### Track Rating Features
+- Bidirectional like/dislike support for YouTube Music tracks
+  - `ytmpctl like` - Toggle like status for currently playing track
+  - `ytmpctl dislike` - Toggle dislike status for currently playing track
+  - Immediate sync trigger after liking songs to update "Liked Songs" playlist
+  - Smart toggle semantics: pressing same command twice reverts action
+  - Support for all rating state transitions (neutral ↔ liked, neutral ↔ disliked, liked ↔ disliked)
+  - Color-coded user feedback (green ✓ for likes, red ✗ for dislikes)
+  - Comprehensive error handling for all failure scenarios
+- Extended `YTMusicClient` with rating methods:
+  - `get_track_rating(video_id)` - Query current rating state
+  - `set_track_rating(video_id, rating)` - Set like/dislike/neutral rating
+  - Rate limiting (100ms minimum between API calls) to prevent API abuse
+  - Automatic retry with exponential backoff for transient failures
+- New `ytmpd.rating` module with rating state machine:
+  - `RatingManager` class for toggle logic and state transitions
+  - `RatingState` enum (NEUTRAL, LIKED, DISLIKED)
+  - `RatingAction` enum (LIKE, DISLIKE, INDIFFERENT)
+  - Complete state transition logic with 6 possible transitions
+- Integration tests for rating workflow (20 tests):
+  - All state transition scenarios tested
+  - Error handling validation (network, auth, MPD connection)
+  - Sync trigger verification
+  - End-to-end workflow validation
+
+### Changed
+- `ytmpctl help` updated to include like/dislike commands
+- README.md expanded with like/dislike feature documentation and examples
+
+### Technical
+- Test coverage: 97% for rating.py, 35% for ytmusic.py rating methods
+- All tests passing (65 total: 20 integration + 28 rating unit + 17 ytmusic_rating unit)
+- Pre-commit hooks passing (ruff, ruff-format)
+- Type hints and docstrings complete for all new code
+
 ### Planned Features
 
 - Seek within track
 - Shuffle and repeat modes
-- Like/dislike tracks
 - Volume control integration
 - Advanced playlist management
 - History tracking
