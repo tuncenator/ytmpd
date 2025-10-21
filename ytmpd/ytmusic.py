@@ -4,7 +4,6 @@ This module provides a wrapper around ytmusicapi that handles authentication
 and provides clean interfaces for search, playback, and song info retrieval.
 """
 
-import json
 import logging
 import time
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ from ytmusicapi import YTMusic
 
 from ytmpd.config import get_config_dir
 from ytmpd.exceptions import YTMusicAPIError, YTMusicAuthError, YTMusicNotFoundError
+from ytmpd.rating import RatingManager, RatingState
 
 logger = logging.getLogger(__name__)
 
@@ -153,19 +153,23 @@ class YTMusicClient:
                     f"API call failed (attempt {attempt + 1}/{max_retries}): {_truncate_error(e)}"
                 )
 
-                # Don't retry on authentication errors
+                # Don't retry on authentication errors or not found errors
                 if "auth" in str(e).lower() or "credential" in str(e).lower():
                     raise YTMusicAuthError(f"Authentication error: {e}") from e
+                if isinstance(e, YTMusicNotFoundError):
+                    raise
 
                 # Exponential backoff
                 if attempt < max_retries - 1:
-                    sleep_time = 2 ** attempt
+                    sleep_time = 2**attempt
                     logger.info(f"Retrying in {sleep_time} seconds...")
                     time.sleep(sleep_time)
 
         # All retries failed
         logger.error(f"API call failed after {max_retries} attempts: {_truncate_error(last_error)}")
-        raise YTMusicAPIError(f"API call failed: {_truncate_error(last_error, max_length=300)}") from last_error
+        raise YTMusicAPIError(
+            f"API call failed: {_truncate_error(last_error, max_length=300)}"
+        ) from last_error
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search for songs on YouTube Music.
@@ -332,7 +336,9 @@ class YTMusicClient:
 
                     # Filter out empty playlists
                     if track_count == 0:
-                        logger.debug(f"Skipping empty playlist: {raw_playlist.get('title', 'Unknown')}")
+                        logger.debug(
+                            f"Skipping empty playlist: {raw_playlist.get('title', 'Unknown')}"
+                        )
                         continue
 
                     playlist = Playlist(
@@ -397,7 +403,9 @@ class YTMusicClient:
 
                     # Skip tracks without video_id (podcasts, etc.)
                     if not video_id:
-                        logger.debug(f"Skipping track without video_id: {raw_track.get('title', 'Unknown')}")
+                        logger.debug(
+                            f"Skipping track without video_id: {raw_track.get('title', 'Unknown')}"
+                        )
                         continue
 
                     # Extract artist name(s)
@@ -420,7 +428,9 @@ class YTMusicClient:
                                 if len(parts) == 2:  # MM:SS
                                     duration_seconds = int(parts[0]) * 60 + int(parts[1])
                                 elif len(parts) == 3:  # HH:MM:SS
-                                    duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                                    duration_seconds = (
+                                        int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                                    )
                             except (ValueError, IndexError):
                                 logger.debug(f"Could not parse duration: {duration_str}")
 
@@ -492,7 +502,9 @@ class YTMusicClient:
 
                     # Skip tracks without video_id (podcasts, etc.)
                     if not video_id:
-                        logger.debug(f"Skipping track without video_id: {raw_track.get('title', 'Unknown')}")
+                        logger.debug(
+                            f"Skipping track without video_id: {raw_track.get('title', 'Unknown')}"
+                        )
                         continue
 
                     # Extract artist name(s)
@@ -515,7 +527,9 @@ class YTMusicClient:
                                 if len(parts) == 2:  # MM:SS
                                     duration_seconds = int(parts[0]) * 60 + int(parts[1])
                                 elif len(parts) == 3:  # HH:MM:SS
-                                    duration_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                                    duration_seconds = (
+                                        int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+                                    )
                             except (ValueError, IndexError):
                                 logger.debug(f"Could not parse duration: {duration_str}")
 
@@ -537,6 +551,103 @@ class YTMusicClient:
         except Exception as e:
             logger.error(f"Failed to fetch liked songs: {e}")
             raise YTMusicAPIError(f"Failed to fetch liked songs: {e}") from e
+
+    def get_track_rating(self, video_id: str) -> RatingState:
+        """Get the current rating/like status of a track.
+
+        Uses get_watch_playlist to retrieve the track's likeStatus field,
+        which is the only reliable method for querying rating state.
+
+        Note: Due to a YouTube Music API limitation, DISLIKED tracks appear
+        as INDIFFERENT when queried. This is a known limitation documented
+        in ytmusicapi.
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            RatingState enum (NEUTRAL, LIKED, or DISLIKED).
+            Note: DISLIKED will appear as NEUTRAL due to API limitation.
+
+        Raises:
+            YTMusicAPIError: If retrieving rating fails.
+            YTMusicNotFoundError: If track is not found.
+            YTMusicAuthError: If client is not authenticated.
+        """
+        if not self._client:
+            raise YTMusicAuthError("Client not initialized")
+
+        logger.info(f"Getting rating for video_id: {video_id}")
+        self._rate_limit()
+
+        def _get_rating() -> str:
+            # Use get_watch_playlist with limit=1 to get track info including likeStatus
+            response = self._client.get_watch_playlist(videoId=video_id, limit=1)
+
+            # Extract likeStatus from the first track
+            tracks = response.get("tracks", [])
+            if not tracks:
+                raise YTMusicNotFoundError(f"Track not found: {video_id}")
+
+            like_status = tracks[0].get("likeStatus")
+            if like_status is None:
+                raise YTMusicAPIError(f"Track does not have likeStatus field: {video_id}")
+
+            return like_status
+
+        try:
+            api_rating = self._retry_on_failure(_get_rating)
+            rating_manager = RatingManager()
+            rating_state = rating_manager.parse_api_rating(api_rating)
+
+            logger.info(f"Track {video_id} has rating: {rating_state.value}")
+            return rating_state
+
+        except (YTMusicNotFoundError, YTMusicAuthError):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to get track rating: {_truncate_error(e)}")
+            raise YTMusicAPIError(f"Failed to get track rating: {_truncate_error(e)}") from e
+
+    def set_track_rating(self, video_id: str, rating: RatingState) -> None:
+        """Set the rating/like status of a track.
+
+        Args:
+            video_id: YouTube video ID.
+            rating: New rating state (NEUTRAL, LIKED, or DISLIKED).
+
+        Raises:
+            YTMusicAPIError: If setting rating fails.
+            YTMusicAuthError: If not authenticated.
+        """
+        if not self._client:
+            raise YTMusicAuthError("Client not initialized")
+
+        logger.info(f"Setting rating for {video_id} to {rating.value}")
+        self._rate_limit()
+
+        def _set_rating() -> None:
+            from ytmusicapi.models.content.enums import LikeStatus
+
+            # Map RatingState to LikeStatus
+            like_status_map = {
+                RatingState.NEUTRAL: LikeStatus.INDIFFERENT,
+                RatingState.LIKED: LikeStatus.LIKE,
+                RatingState.DISLIKED: LikeStatus.DISLIKE,
+            }
+
+            api_rating = like_status_map[rating]
+            self._client.rate_song(videoId=video_id, rating=api_rating)
+
+        try:
+            self._retry_on_failure(_set_rating)
+            logger.info(f"Successfully set rating to {rating.value}")
+
+        except YTMusicAuthError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to set track rating: {_truncate_error(e)}")
+            raise YTMusicAPIError(f"Failed to set track rating: {_truncate_error(e)}") from e
 
     @staticmethod
     def _parse_duration(duration_str: str) -> int:
