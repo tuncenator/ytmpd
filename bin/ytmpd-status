@@ -475,36 +475,76 @@ def adaptive_truncate_status(
             bar_part = f" {bar_to_use}" if bar_to_use else ""
             return f"{icon} {song_name} [{position_str}{bar_part} {duration_str}]{context_suffix}"
 
-    # Still doesn't fit - try hiding the bar entirely
-    # (or if fixed_bar_length, skip straight to this)
+    # Still doesn't fit - handle based on fixed_bar_length setting
     if full_output_length > available_space:
-        # Hide the bar and use all space for song name
-        available_for_song = available_space
+        if fixed_bar_length:
+            # Fixed bar mode: ALWAYS show bar at full length, truncate song name to fit
+            available_for_song = available_space - len(progress_bar_str)
 
-        if len(song_name) <= available_for_song:
-            # Fits without bar
-            return f"{icon} {song_name} [{position_str} {duration_str}]{context_suffix}"
+            # Need to truncate the song name
+            if len(song_name) > available_for_song:
+                # Try to preserve artist name if possible
+                separator_pos = song_name.find(" - ")
 
-        # Need to truncate the song name
-        # Try to preserve artist name if possible
-        separator_pos = song_name.find(" - ")
+                if separator_pos != -1 and separator_pos < available_for_song - 5:
+                    # Try to keep artist and truncate title
+                    artist_part = song_name[:separator_pos]
+                    title_part = song_name[separator_pos + 3 :]  # Skip " - "
 
-        if separator_pos != -1 and separator_pos < available_for_song - 5:
-            # Try to keep artist and truncate title
-            artist_part = song_name[:separator_pos]
-            title_part = song_name[separator_pos + 3 :]  # Skip " - "
+                    # Calculate space for title
+                    available_for_title = (
+                        available_for_song - len(artist_part) - 3 - 1
+                    )  # " - " + ellipsis
 
-            # Calculate space for title
-            available_for_title = available_for_song - len(artist_part) - 3 - 1  # " - " + ellipsis
+                    if available_for_title >= 2:
+                        truncated_title = title_part[: available_for_title - 1] + ellipsis
+                        truncated_song = f"{artist_part} - {truncated_title}"
+                    else:
+                        # Not enough room for title, truncate artist instead
+                        truncated_song = song_name[: available_for_song - 1] + ellipsis
+                else:
+                    # Artist name too long or no separator - truncate from end
+                    truncated_song = song_name[: available_for_song - 1] + ellipsis
+            else:
+                truncated_song = song_name
 
-            if available_for_title >= 2:
-                truncated_title = title_part[: available_for_title - 1] + ellipsis
-                truncated_song = f"{artist_part} - {truncated_title}"
-                return f"{icon} {truncated_song} [{position_str} {duration_str}]{context_suffix}"
+            # Always include the bar
+            bar_part = f" {progress_bar_str}" if progress_bar_str else ""
+            return (
+                f"{icon} {truncated_song} [{position_str}{bar_part} {duration_str}]{context_suffix}"
+            )
+        else:
+            # Non-fixed bar mode: hide the bar and use all space for song name
+            available_for_song = available_space
 
-        # Artist name too long or no separator - truncate from end
-        truncated_song = song_name[: available_for_song - 1] + ellipsis
-        return f"{icon} {truncated_song} [{position_str} {duration_str}]{context_suffix}"
+            if len(song_name) <= available_for_song:
+                # Fits without bar
+                return f"{icon} {song_name} [{position_str} {duration_str}]{context_suffix}"
+
+            # Need to truncate the song name
+            # Try to preserve artist name if possible
+            separator_pos = song_name.find(" - ")
+
+            if separator_pos != -1 and separator_pos < available_for_song - 5:
+                # Try to keep artist and truncate title
+                artist_part = song_name[:separator_pos]
+                title_part = song_name[separator_pos + 3 :]  # Skip " - "
+
+                # Calculate space for title
+                available_for_title = (
+                    available_for_song - len(artist_part) - 3 - 1
+                )  # " - " + ellipsis
+
+                if available_for_title >= 2:
+                    truncated_title = title_part[: available_for_title - 1] + ellipsis
+                    truncated_song = f"{artist_part} - {truncated_title}"
+                    return (
+                        f"{icon} {truncated_song} [{position_str} {duration_str}]{context_suffix}"
+                    )
+
+            # Artist name too long or no separator - truncate from end
+            truncated_song = song_name[: available_for_song - 1] + ellipsis
+            return f"{icon} {truncated_song} [{position_str} {duration_str}]{context_suffix}"
 
     # Fallback (shouldn't reach here)
     bar_part = f" {bar_to_use}" if bar_to_use else ""
