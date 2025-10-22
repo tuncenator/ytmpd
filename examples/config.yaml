@@ -22,9 +22,14 @@ log_file: ~/.config/ytmpd/ytmpd.log
 
 # ===== MPD Integration Settings =====
 
-# Path to the MPD Unix socket
+# MPD connection (Unix socket or TCP)
+# For Unix socket (recommended): Use the socket file path
+# For TCP connection: Use "host:port" format (e.g., "localhost:6600")
 # Default: ~/.config/mpd/socket
-# This is the Unix socket that MPD listens on (not TCP port)
+# Examples:
+#   - Unix socket: ~/.config/mpd/socket
+#   - TCP: localhost:6600
+#   - TCP remote: 192.168.1.100:6600
 mpd_socket_path: ~/.config/mpd/socket
 
 # Path to MPD's playlist directory

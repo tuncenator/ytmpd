@@ -27,17 +27,26 @@ Color Codes (for i3blocks):
     Stopped: #808080 (gray)
 """
 
-import argparse
+# Auto-detect and use venv if available
 import os
-import re
-import signal
-import sqlite3
 import sys
-import time
 from pathlib import Path
 
-from mpd import ConnectionError as MPDConnectionError
-from mpd import MPDClient
+_script_dir = Path(__file__).resolve().parent.parent
+_venv_python = _script_dir / ".venv" / "bin" / "python"
+
+if _venv_python.exists() and sys.executable != str(_venv_python):
+    # Re-exec using venv Python
+    os.execv(str(_venv_python), [str(_venv_python)] + sys.argv)
+
+import argparse  # noqa: E402
+import re  # noqa: E402
+import signal  # noqa: E402
+import sqlite3  # noqa: E402
+import time  # noqa: E402
+
+from mpd import ConnectionError as MPDConnectionError  # noqa: E402
+from mpd import MPDClient  # noqa: E402
 
 __version__ = "2.1.0"
 

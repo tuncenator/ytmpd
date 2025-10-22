@@ -686,6 +686,11 @@ class YTMusicClient:
             YTMusicAuthError: If browser setup fails.
         """
         config_dir = get_config_dir()
+
+        # Create config directory if it doesn't exist
+        if not config_dir.exists():
+            config_dir.mkdir(parents=True, exist_ok=True)
+
         browser_file = config_dir / "browser.json"
 
         print("=" * 60)
@@ -704,18 +709,25 @@ class YTMusicClient:
         print()
         print("See: https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html")
         print()
-        print("Paste the request headers below and press Enter twice:")
+        print("Paste the request headers below and press Enter twice (empty line):")
         print()
 
         try:
-            # Read multi-line input until double newline
+            # Read multi-line input until empty line
             lines = []
-            print("(Press Ctrl+D or Ctrl+Z when done)")
+            empty_line_count = 0
             while True:
                 try:
                     line = input()
-                    lines.append(line)
+                    if not line.strip():
+                        empty_line_count += 1
+                        if empty_line_count >= 2:
+                            break
+                    else:
+                        empty_line_count = 0
+                        lines.append(line)
                 except EOFError:
+                    # Also accept Ctrl+D/Ctrl+Z as termination
                     break
 
             headers_raw = "\n".join(lines)

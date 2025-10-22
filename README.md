@@ -521,8 +521,6 @@ bindsym $mod+Shift+p exec --no-startup-id killall -SIGUSR1 i3blocks
 bindsym $mod+Shift+n exec --no-startup-id killall -SIGUSR1 i3blocks
 ```
 
-See `examples/i3-config` for a complete example.
-
 ### i3blocks Status Display
 
 The `ytmpd-status` script shows MPD playback status with intelligent truncation that protects critical information.
@@ -552,7 +550,7 @@ The status block will display:
 - Progress bar shrinks adaptively or hides if needed
 - Song name truncates with ellipsis as last resort
 
-See `examples/i3blocks-config` for a complete example and advanced configuration options.
+See `examples/i3blocks.conf` for a complete example and advanced configuration options.
 
 ## Configuration
 
@@ -566,7 +564,7 @@ log_level: INFO
 log_file: ~/.config/ytmpd/ytmpd.log
 
 # MPD Integration
-mpd_socket_path: ~/.config/mpd/socket
+mpd_socket_path: ~/.config/mpd/socket  # Or use TCP: "localhost:6600"
 sync_interval_minutes: 30
 enable_auto_sync: true
 playlist_prefix: "YT: "
@@ -582,7 +580,7 @@ See `examples/config.yaml` for documentation of all options.
 ### Configuration Options
 
 #### MPD Integration
-- **mpd_socket_path**: Path to MPD Unix socket (default: `~/.config/mpd/socket`)
+- **mpd_socket_path**: MPD connection - Unix socket path (e.g., `~/.config/mpd/socket`) or TCP `host:port` (e.g., `localhost:6600`) (default: `~/.config/mpd/socket`)
 - **sync_interval_minutes**: How often to auto-sync in minutes (default: 30)
 - **enable_auto_sync**: Enable/disable periodic auto-sync (default: true)
 - **playlist_prefix**: Prefix for YouTube playlists in MPD (default: "YT: ")
@@ -858,8 +856,7 @@ ytmpd/
 │   └── test_ytmusic.py
 ├── examples/                   # Example configurations
 │   ├── config.yaml             # Example ytmpd config
-│   ├── i3-config               # Example i3 keybindings (mpc)
-│   └── i3blocks-config         # Example i3blocks configuration
+│   └── i3blocks.conf           # Example i3blocks configuration
 ├── docs/
 │   ├── agent/                  # AI agent workflow documentation
 │   └── MIGRATION.md            # Migration guide from v1

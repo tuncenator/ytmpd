@@ -109,6 +109,7 @@ else
 fi
 
 # Step 6: Optionally install systemd service
+SYSTEMD_INSTALLED=false
 info ""
 info "=========================================="
 info "systemd Service Installation (Optional)"
@@ -146,14 +147,13 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
         ytmpd.service > "$SERVICE_FILE"
 
     info "systemd service installed to $SERVICE_FILE"
-    info "To enable and start the service, run:"
-    info "  systemctl --user enable ytmpd.service"
-    info "  systemctl --user start ytmpd.service"
+    SYSTEMD_INSTALLED=true
 else
     info "Skipping systemd service installation"
 fi
 
 # Step 7: Install binaries
+BINARIES_INSTALLED=false
 info ""
 info "=========================================="
 info "Binary Installation"
@@ -177,6 +177,7 @@ if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
     info "Note: ~/.local/bin should be in your PATH (usually added by default)"
     info "If not, add this to your shell RC file:"
     info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    BINARIES_INSTALLED=true
 else
     info "Skipping binary installation. You can use absolute paths:"
     info "  $SCRIPT_DIR/bin/ytmpctl"
@@ -191,14 +192,55 @@ info "=========================================="
 info ""
 info "ytmpd has been successfully installed to: $SCRIPT_DIR"
 info ""
-info "Quick Start:"
-info "  1. Start daemon: source .venv/bin/activate && python -m ytmpd &"
-info "  2. Control playback: $SCRIPT_DIR/bin/ytmpctl play \"hey jude beatles\""
-info "  3. Check status: $SCRIPT_DIR/bin/ytmpctl status"
+
+# Dynamic instructions based on what was installed
+if [ "$SYSTEMD_INSTALLED" = true ]; then
+    info "Quick Start (with systemd):"
+    info "  1. Enable and start daemon:"
+    info "     systemctl --user enable --now ytmpd.service"
+    info ""
+    if [ "$BINARIES_INSTALLED" = true ]; then
+        info "  2. Control playback:"
+        info "     ytmpctl play \"hey jude beatles\""
+        info ""
+        info "  3. Check status:"
+        info "     ytmpctl status"
+    else
+        info "  2. Control playback:"
+        info "     $SCRIPT_DIR/bin/ytmpctl play \"hey jude beatles\""
+        info ""
+        info "  3. Check status:"
+        info "     $SCRIPT_DIR/bin/ytmpctl status"
+    fi
+else
+    info "Quick Start (manual):"
+    info "  1. Start daemon:"
+    info "     source .venv/bin/activate && python -m ytmpd &"
+    info ""
+    if [ "$BINARIES_INSTALLED" = true ]; then
+        info "  2. Control playback:"
+        info "     ytmpctl play \"hey jude beatles\""
+        info ""
+        info "  3. Check status:"
+        info "     ytmpctl status"
+    else
+        info "  2. Control playback:"
+        info "     $SCRIPT_DIR/bin/ytmpctl play \"hey jude beatles\""
+        info ""
+        info "  3. Check status:"
+        info "     $SCRIPT_DIR/bin/ytmpctl status"
+    fi
+fi
+
 info ""
-info "For i3 integration, see examples:"
-info "  - examples/i3-config (keybindings)"
-info "  - examples/i3blocks-config (status display)"
+if [ "$BINARIES_INSTALLED" = true ]; then
+    info "For i3blocks integration:"
+    info "  - See examples/i3blocks.conf for configuration examples"
+    info "  - Use 'ytmpd-status' in your i3blocks config"
+else
+    info "For i3blocks integration:"
+    info "  - See examples/i3blocks.conf for configuration examples"
+fi
 info ""
 info "Documentation: README.md"
 info "Troubleshooting: See 'Troubleshooting' section in README.md"

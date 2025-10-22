@@ -1,0 +1,23 @@
+# Python virtual environments (machine-specific)
+.venv/
+venv/
+ENV/
+env/
+
+# Machine-specific build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# OS specific
+.DS_Store
+Thumbs.db
