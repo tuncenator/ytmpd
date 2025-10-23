@@ -1,23 +1,35 @@
 # Python virtual environments (machine-specific)
-.venv/
-venv/
-ENV/
-env/
+.venv
+venv
+ENV
+env
 
 # Machine-specific build artifacts
-__pycache__/
+__pycache__
 *.pyc
 *.pyo
 *.so
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+.pytest_cache
+.mypy_cache
+.ruff_cache
 .coverage
-htmlcov/
-*.egg-info/
-build/
-dist/
+htmlcov
+*.egg-info
+build
+dist
+MagicMock
 
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Git directory (should not be synced, use git for version control)
+.git
+
+# Local state and runtime files (machine-specific)
+*.sock
+socket
+state.json
+
+# Pre-commit hooks (machine-specific)
+.pre-commit-config.yaml
