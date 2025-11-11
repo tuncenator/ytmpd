@@ -761,6 +761,20 @@ def cmd_dislike() -> None:
         sys.exit(1)
 
 
+def cmd_auth() -> None:
+    """Set up or refresh YouTube Music authentication."""
+    from ytmpd.ytmusic import YTMusicClient
+
+    try:
+        YTMusicClient.setup_browser()
+    except KeyboardInterrupt:
+        print("\nAuthentication cancelled")
+        sys.exit(1)
+    except Exception as e:
+        print(colorize(f"✗ Authentication failed: {e}", "red"), file=sys.stderr)
+        sys.exit(1)
+
+
 def show_help() -> None:
     """Display help message."""
     help_text = f"""{colorize("ytmpctl", "bold")} - YouTube Music to MPD sync control
@@ -774,6 +788,7 @@ def show_help() -> None:
   ytmpctl search            Interactive search for YouTube Music tracks
   ytmpctl like              Toggle like for current track
   ytmpctl dislike           Toggle dislike for current track
+  ytmpctl auth              Set up or refresh YouTube Music authentication
   ytmpctl help              Show this help message
 
 {colorize("Playback Control:", "bold")}
@@ -845,6 +860,8 @@ def main() -> NoReturn:
         cmd_like()
     elif command == "dislike":
         cmd_dislike()
+    elif command == "auth":
+        cmd_auth()
     elif command == "help" or command == "--help" or command == "-h":
         show_help()
     else:

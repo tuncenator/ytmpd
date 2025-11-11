@@ -589,9 +589,17 @@ class YTMusicClient:
             if not tracks:
                 raise YTMusicNotFoundError(f"Track not found: {video_id}")
 
-            like_status = tracks[0].get("likeStatus")
+            track = tracks[0]
+            like_status = track.get("likeStatus")
+
+            # Some tracks (e.g., MUSIC_VIDEO_TYPE_ATV) return likeStatus=None
+            # Treat None as INDIFFERENT (neutral)
             if like_status is None:
-                raise YTMusicAPIError(f"Track does not have likeStatus field: {video_id}")
+                logger.info(
+                    f"Track {video_id} has likeStatus=None (videoType: {track.get('videoType')}), "
+                    f"treating as INDIFFERENT"
+                )
+                return "INDIFFERENT"
 
             return like_status
 
