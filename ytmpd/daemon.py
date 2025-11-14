@@ -7,13 +7,11 @@ playlist syncing to MPD, with support for periodic auto-sync and manual triggers
 import asyncio
 import json
 import logging
-import os
 import signal
 import socket
 import threading
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
 
 from ytmpd.config import get_config_dir, load_config
@@ -21,7 +19,7 @@ from ytmpd.exceptions import MPDConnectionError
 from ytmpd.icy_proxy import ICYProxyServer
 from ytmpd.mpd_client import MPDClient
 from ytmpd.stream_resolver import StreamResolver
-from ytmpd.sync_engine import SyncEngine, SyncResult
+from ytmpd.sync_engine import SyncEngine
 from ytmpd.track_store import TrackStore
 from ytmpd.ytmusic import YTMusicClient
 
@@ -45,7 +43,7 @@ class YTMPDaemon:
 
         # Load configuration
         self.config = load_config()
-        logger.info(f"Configuration loaded")
+        logger.info("Configuration loaded")
 
         # Get auth file path (browser.json or oauth.json)
         config_dir = get_config_dir()
@@ -71,7 +69,7 @@ class YTMPDaemon:
             self.ytmusic_client = YTMusicClient(auth_file=auth_file)
             self.mpd_client = MPDClient(
                 socket_path=self.config["mpd_socket_path"],
-                playlist_directory=self.config.get("mpd_playlist_directory")
+                playlist_directory=self.config.get("mpd_playlist_directory"),
             )
             # Persistent cache file for stream URLs
             cache_file = get_config_dir() / "stream_cache.json"
@@ -102,7 +100,8 @@ class YTMPDaemon:
                     "port": self.config["proxy_port"],
                 }
                 logger.info(
-                    f"Proxy server initialized at {self.config['proxy_host']}:{self.config['proxy_port']} "
+                    f"Proxy server initialized at "
+                    f"{self.config['proxy_host']}:{self.config['proxy_port']} "
                     f"with URL refresh support and YouTube Premium auth"
                 )
 
@@ -117,7 +116,9 @@ class YTMPDaemon:
                 playlist_format=self.config.get("playlist_format", "m3u"),
                 mpd_music_directory=self.config.get("mpd_music_directory"),
                 sync_liked_songs=self.config.get("sync_liked_songs", True),
-                liked_songs_playlist_name=self.config.get("liked_songs_playlist_name", "Liked Songs"),
+                liked_songs_playlist_name=self.config.get(
+                    "liked_songs_playlist_name", "Liked Songs"
+                ),
             )
         except Exception as e:
             logger.error(f"Failed to initialize components: {e}")
@@ -157,7 +158,7 @@ class YTMPDaemon:
             raise
 
         self._running = True
-        self.state["daemon_start_time"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        self.state["daemon_start_time"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         self._save_state()
 
         # Setup signal handlers
@@ -167,9 +168,7 @@ class YTMPDaemon:
 
         # Start background threads (daemon=True allows process to exit even if threads are stuck)
         self._sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
-        self._socket_thread = threading.Thread(
-            target=self._listen_for_triggers, daemon=True
-        )
+        self._socket_thread = threading.Thread(target=self._listen_for_triggers, daemon=True)
 
         self._sync_thread.start()
         self._socket_thread.start()
@@ -177,9 +176,7 @@ class YTMPDaemon:
         # Start proxy server if enabled
         if self.proxy_server:
             logger.info("Starting ICY proxy server...")
-            self._proxy_thread = threading.Thread(
-                target=self._run_proxy_server, daemon=True
-            )
+            self._proxy_thread = threading.Thread(target=self._run_proxy_server, daemon=True)
             self._proxy_thread.start()
 
         logger.info("ytmpd daemon started successfully")
@@ -199,7 +196,12 @@ class YTMPDaemon:
 
         # Cleanup after main loop exits
         logger.info("Main loop exited, cleaning up...")
-        logger.debug(f"Threads alive: sync={self._sync_thread.is_alive() if self._sync_thread else None}, socket={self._socket_thread.is_alive() if self._socket_thread else None}, proxy={self._proxy_thread.is_alive() if self._proxy_thread else None}")
+        sync_alive = self._sync_thread.is_alive() if self._sync_thread else None
+        socket_alive = self._socket_thread.is_alive() if self._socket_thread else None
+        proxy_alive = self._proxy_thread.is_alive() if self._proxy_thread else None
+        logger.debug(
+            f"Threads alive: sync={sync_alive}, socket={socket_alive}, proxy={proxy_alive}"
+        )
         self.stop()
 
     def stop(self) -> None:
@@ -234,13 +236,14 @@ class YTMPDaemon:
             try:
                 # Signal the proxy server to shut down
                 if self._proxy_shutdown_event:
+
                     def set_shutdown_event():
                         if self._proxy_shutdown_event:
                             self._proxy_shutdown_event.set()
 
                     self._proxy_loop.call_soon_threadsafe(set_shutdown_event)
 
-                # Wait for proxy thread to finish (increased timeout to 10s for HTTP session cleanup)
+                # Wait for proxy thread to finish (10s timeout for HTTP cleanup)
                 if self._proxy_thread and self._proxy_thread.is_alive():
                     logger.debug("Waiting for proxy thread to stop...")
                     self._proxy_thread.join(timeout=10)
@@ -352,7 +355,9 @@ class YTMPDaemon:
                         task.cancel()
                     # Wait for all tasks to be cancelled
                     if pending:
-                        self._proxy_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        self._proxy_loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
                 except Exception as e:
                     logger.warning(f"Error cancelling tasks: {e}")
 
@@ -377,7 +382,7 @@ class YTMPDaemon:
                 result = self.sync_engine.sync_all_playlists()
 
                 # Update state
-                self.state["last_sync"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                self.state["last_sync"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
                 self.state["last_sync_result"] = {
                     "success": result.success,
                     "playlists_synced": result.playlists_synced,
@@ -410,7 +415,7 @@ class YTMPDaemon:
             except Exception as e:
                 logger.error(f"Sync failed with exception: {e}", exc_info=True)
                 # Update state with failure
-                self.state["last_sync"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                self.state["last_sync"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
                 self.state["last_sync_result"] = {
                     "success": False,
                     "playlists_synced": 0,
@@ -453,7 +458,7 @@ class YTMPDaemon:
             while self._running:
                 try:
                     conn, _ = sock.accept()
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 except Exception as e:
                     if self._running:
@@ -527,18 +532,24 @@ class YTMPDaemon:
             # Send response
             conn.sendall((json.dumps(response) + "\n").encode("utf-8"))
 
-        except socket.timeout:
+        except TimeoutError:
             logger.warning("Socket connection timed out waiting for command")
             try:
                 error_response = {"success": False, "error": "Connection timeout"}
                 conn.sendall((json.dumps(error_response) + "\n").encode("utf-8"))
             except Exception:
                 pass
+        except BrokenPipeError:
+            # Client disconnected before we could send response - this is fine
+            logger.debug("Client disconnected before response could be sent (broken pipe)")
         except Exception as e:
             logger.error(f"Error handling socket connection: {e}", exc_info=True)
             try:
                 error_response = {"success": False, "error": str(e)}
                 conn.sendall((json.dumps(error_response) + "\n").encode("utf-8"))
+            except (BrokenPipeError, ConnectionResetError):
+                # Client already gone, can't send error response
+                pass
             except Exception:
                 pass
 
@@ -564,6 +575,9 @@ class YTMPDaemon:
         """Handle 'status' command - return sync status."""
         last_sync_result = self.state.get("last_sync_result", {})
 
+        # Check authentication status
+        auth_valid, auth_error = self.ytmusic_client.is_authenticated()
+
         return {
             "success": True,
             "last_sync": self.state.get("last_sync"),
@@ -575,6 +589,8 @@ class YTMPDaemon:
             "tracks_failed": last_sync_result.get("tracks_failed", 0),
             "errors": last_sync_result.get("errors", []),
             "last_sync_success": last_sync_result.get("success", False),
+            "auth_valid": auth_valid,
+            "auth_error": auth_error,
         }
 
     def _cmd_list(self) -> dict[str, Any]:
@@ -582,8 +598,7 @@ class YTMPDaemon:
         try:
             playlists = self.ytmusic_client.get_user_playlists()
             playlist_data = [
-                {"name": p.name, "id": p.id, "track_count": p.track_count}
-                for p in playlists
+                {"name": p.name, "id": p.id, "track_count": p.track_count} for p in playlists
             ]
             return {"success": True, "playlists": playlist_data}
         except Exception as e:
@@ -634,7 +649,8 @@ class YTMPDaemon:
 
         # Match pattern: */proxy/{video_id}
         import re
-        match = re.search(r'/proxy/([A-Za-z0-9_-]{11})$', url)
+
+        match = re.search(r"/proxy/([A-Za-z0-9_-]{11})$", url)
         return match.group(1) if match else None
 
     def _cmd_radio(self, video_id: str | None) -> dict[str, Any]:
@@ -677,9 +693,7 @@ class YTMPDaemon:
             # Get radio playlist from YouTube Music
             logger.info(f"Fetching radio playlist for video ID: {video_id}")
             radio_tracks = self.ytmusic_client._client.get_watch_playlist(
-                videoId=video_id,
-                radio=True,
-                limit=self.config.get("radio_playlist_limit", 25)
+                videoId=video_id, radio=True, limit=self.config.get("radio_playlist_limit", 25)
             )
 
             if not radio_tracks:
@@ -687,7 +701,9 @@ class YTMPDaemon:
 
             # Extract video IDs from radio tracks
             # get_watch_playlist returns a dict with "tracks" key
-            tracks = radio_tracks.get("tracks", []) if isinstance(radio_tracks, dict) else radio_tracks
+            tracks = (
+                radio_tracks.get("tracks", []) if isinstance(radio_tracks, dict) else radio_tracks
+            )
             video_ids = []
             for track in tracks:
                 if isinstance(track, dict) and "videoId" in track:
@@ -700,6 +716,7 @@ class YTMPDaemon:
 
             # Build TrackWithMetadata objects for playlist creation
             from ytmpd.mpd_client import TrackWithMetadata
+
             track_objects = []
 
             # Check if proxy is enabled for on-demand resolution
@@ -718,7 +735,13 @@ class YTMPDaemon:
                         # Extract artist info
                         artists = track.get("artists", [])
                         if isinstance(artists, list) and artists:
-                            artist = ", ".join([a.get("name", "") for a in artists if isinstance(a, dict) and a.get("name")])
+                            artist = ", ".join(
+                                [
+                                    a.get("name", "")
+                                    for a in artists
+                                    if isinstance(a, dict) and a.get("name")
+                                ]
+                            )
                         else:
                             artist = "Unknown Artist"
 
@@ -738,13 +761,15 @@ class YTMPDaemon:
                             except Exception as e:
                                 logger.warning(f"Failed to save track metadata for {vid}: {e}")
 
-                        track_objects.append(TrackWithMetadata(
-                            url="",  # Empty URL, proxy URL will be generated in create_or_replace_playlist
-                            title=title,
-                            artist=artist,
-                            video_id=vid,
-                            duration_seconds=duration_seconds
-                        ))
+                        track_objects.append(
+                            TrackWithMetadata(
+                                url="",  # Proxy will generate URL on-demand
+                                title=title,
+                                artist=artist,
+                                video_id=vid,
+                                duration_seconds=duration_seconds,
+                            )
+                        )
 
             if not track_objects:
                 return {"success": False, "error": "No valid tracks to add to playlist"}
@@ -757,7 +782,7 @@ class YTMPDaemon:
                 tracks=track_objects,
                 proxy_config=self.proxy_config,
                 playlist_format=self.config.get("playlist_format", "m3u"),
-                mpd_music_directory=self.config.get("mpd_music_directory")
+                mpd_music_directory=self.config.get("mpd_music_directory"),
             )
 
             logger.info(f"Radio playlist created successfully: {len(track_objects)} tracks")
@@ -765,7 +790,7 @@ class YTMPDaemon:
                 "success": True,
                 "message": f"Radio playlist created: {len(track_objects)} tracks",
                 "tracks": len(track_objects),
-                "playlist": playlist_name
+                "playlist": playlist_name,
             }
 
         except Exception as e:
@@ -798,20 +823,18 @@ class YTMPDaemon:
             # Format results
             formatted = []
             for idx, track in enumerate(results, 1):
-                formatted.append({
-                    "number": idx,
-                    "video_id": track.get("video_id", ""),
-                    "title": track.get("title", "Unknown"),
-                    "artist": track.get("artist", "Unknown Artist"),
-                    "duration": self._format_duration(track.get("duration", 0))
-                })
+                formatted.append(
+                    {
+                        "number": idx,
+                        "video_id": track.get("video_id", ""),
+                        "title": track.get("title", "Unknown"),
+                        "artist": track.get("artist", "Unknown Artist"),
+                        "duration": self._format_duration(track.get("duration", 0)),
+                    }
+                )
 
             logger.info(f"Found {len(formatted)} results for: {query}")
-            return {
-                "success": True,
-                "results": formatted,
-                "count": len(formatted)
-            }
+            return {"success": True, "results": formatted, "count": len(formatted)}
 
         except Exception as e:
             logger.error(f"Search failed: {e}")
@@ -863,8 +886,8 @@ class YTMPDaemon:
             return {
                 "success": True,
                 "message": f"Now playing: {track_info['title']} - {track_info['artist']}",
-                "title": track_info['title'],
-                "artist": track_info['artist']
+                "title": track_info["title"],
+                "artist": track_info["artist"],
             }
 
         except Exception as e:
@@ -915,8 +938,8 @@ class YTMPDaemon:
             return {
                 "success": True,
                 "message": f"Added to queue: {track_info['title']} - {track_info['artist']}",
-                "title": track_info['title'],
-                "artist": track_info['artist']
+                "title": track_info["title"],
+                "artist": track_info["artist"],
             }
 
         except Exception as e:
@@ -956,7 +979,7 @@ class YTMPDaemon:
                 track = results[0]
                 return {
                     "title": track.get("title", "Unknown"),
-                    "artist": track.get("artist", "Unknown Artist")
+                    "artist": track.get("artist", "Unknown Artist"),
                 }
         except Exception as e:
             logger.warning(f"Failed to get track info for {video_id}: {e}")
@@ -1003,7 +1026,7 @@ class YTMPDaemon:
             }
 
         try:
-            with open(self.state_file, "r") as f:
+            with open(self.state_file) as f:
                 state = json.load(f)
             logger.info(f"State loaded from {self.state_file}")
             return state

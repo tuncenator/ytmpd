@@ -197,6 +197,17 @@ def cmd_status() -> None:
     # Daemon start time
     daemon_start = format_datetime(result.get("daemon_start_time"))
     print(f"Daemon started: {daemon_start}")
+
+    # Authentication status
+    auth_valid = result.get("auth_valid", False)
+    auth_error = result.get("auth_error", "")
+    if auth_valid:
+        print(f"Authentication: {colorize('Valid', 'green')}")
+    else:
+        print(f"Authentication: {colorize('INVALID', 'red')}")
+        if auth_error:
+            print(f"  Error: {auth_error}")
+            print(f"  Run: {colorize('ytmpctl auth', 'blue')} to re-authenticate")
     print()
 
     # Sync in progress indicator

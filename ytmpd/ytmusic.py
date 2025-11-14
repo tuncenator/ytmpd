@@ -92,6 +92,12 @@ class YTMusicClient:
         self._last_request_time = 0.0
         self._min_request_interval = 0.1  # 100ms between requests (rate limiting)
 
+        # Auth status caching (to avoid slow API calls on every status request)
+        self._auth_cache_valid = True
+        self._auth_cache_error = ""
+        self._auth_cache_time = 0.0
+        self._auth_cache_ttl = 300.0  # 5 minutes
+
         # Initialize the client
         self._init_client()
 
@@ -119,6 +125,56 @@ class YTMusicClient:
         except Exception as e:
             logger.error(f"Failed to initialize YouTube Music client: {e}")
             raise YTMusicAuthError(f"Authentication failed: {e}") from e
+
+    def is_authenticated(self) -> tuple[bool, str]:
+        """Check if the client is properly authenticated with YouTube Music.
+
+        Uses cached result for 5 minutes to avoid slow API calls on every status request.
+
+        Returns:
+            Tuple of (is_valid, error_message). error_message is empty string if valid.
+        """
+        if not self._client:
+            return False, "Client not initialized"
+
+        # Check if cache is still valid
+        current_time = time.time()
+        cache_age = current_time - self._auth_cache_time
+
+        if cache_age < self._auth_cache_ttl:
+            # Use cached result
+            return self._auth_cache_valid, self._auth_cache_error
+
+        # Cache expired, check auth status
+        try:
+            # Make a lightweight API call to test authentication
+            # get_library_playlists with limit=1 is fast and requires auth
+            self._client.get_library_playlists(limit=1)
+
+            # Update cache
+            self._auth_cache_valid = True
+            self._auth_cache_error = ""
+            self._auth_cache_time = current_time
+
+            return True, ""
+        except Exception as e:
+            error_msg = str(e)
+            # Check for common auth-related errors
+            if any(
+                keyword in error_msg.lower()
+                for keyword in ["auth", "credential", "unauthorized", "forbidden"]
+            ):
+                auth_error = f"Authentication error: {_truncate_error(e, max_length=150)}"
+            else:
+                # Other errors might be transient API issues
+                auth_error = f"API error: {_truncate_error(e, max_length=150)}"
+
+            # Update cache
+            self._auth_cache_valid = False
+            self._auth_cache_error = auth_error
+            self._auth_cache_time = current_time
+
+            return False, auth_error
 
     def _rate_limit(self) -> None:
         """Enforce rate limiting between API requests."""

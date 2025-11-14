@@ -40,8 +40,10 @@ if _venv_python.exists() and sys.executable != str(_venv_python):
     os.execv(str(_venv_python), [str(_venv_python)] + sys.argv)
 
 import argparse  # noqa: E402
+import json  # noqa: E402
 import re  # noqa: E402
 import signal  # noqa: E402
+import socket  # noqa: E402
 import sqlite3  # noqa: E402
 import time  # noqa: E402
 
@@ -49,6 +51,51 @@ from mpd import ConnectionError as MPDConnectionError  # noqa: E402
 from mpd import MPDClient  # noqa: E402
 
 __version__ = "2.1.0"
+
+
+def get_auth_status() -> tuple[bool, str]:
+    """Check authentication status from ytmpd daemon.
+
+    Returns:
+        Tuple of (is_valid, error_message). error_message is empty string if valid.
+        Returns (True, "") if daemon is not running (can't check).
+    """
+    try:
+        socket_path = Path.home() / ".config" / "ytmpd" / "sync_socket"
+        if not socket_path.exists():
+            # Daemon not running, can't check auth
+            return True, ""
+
+        # Connect to Unix socket
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(1.0)  # 1 second timeout
+        sock.connect(str(socket_path))
+
+        # Send status command
+        sock.sendall(b"status\n")
+
+        # Receive response
+        response = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            if b"\n" in response:
+                break
+
+        sock.close()
+
+        # Parse JSON response
+        result = json.loads(response.decode("utf-8").strip())
+        auth_valid = result.get("auth_valid", True)
+        auth_error = result.get("auth_error", "")
+
+        return auth_valid, auth_error
+
+    except Exception:
+        # If any error, assume auth is ok (we just can't check)
+        return True, ""
 
 
 def get_mpd_client(host: str = "localhost", port: int = 6601) -> MPDClient | None:
@@ -1306,12 +1353,20 @@ def main() -> None:
     client = get_mpd_client(host=args.host, port=args.port)
 
     if client is None:
-        # MPD not running
+        # MPD not running - check auth status to help diagnose issues
+        auth_valid, auth_error = get_auth_status()
         stop_icon = args.icon_stopped
         stop_color = args.color_stopped
-        print(f"{stop_icon} MPD stopped")
-        print(f"{stop_icon} MPD stopped")  # Short text
-        print(stop_color)
+
+        if not auth_valid:
+            # Show auth error prominently
+            print(f"{stop_icon} MPD stopped | ⚠ Auth invalid")
+            print(f"{stop_icon} Auth invalid")  # Short text
+            print("#FF0000")  # Red color for auth error
+        else:
+            print(f"{stop_icon} MPD stopped")
+            print(f"{stop_icon} MPD stopped")  # Short text
+            print(stop_color)
         sys.exit(0)
 
     # Handle click events if requested (in polling mode)
@@ -1328,11 +1383,20 @@ def main() -> None:
         state = status.get("state", "stop")
 
         if state == "stop" or not current_song:
+            # Check auth status when stopped - helps diagnose sync issues
+            auth_valid, auth_error = get_auth_status()
             stop_icon = args.icon_stopped
             stop_color = args.color_stopped
-            print(f"{stop_icon} Stopped")
-            print(f"{stop_icon} Stopped")  # Short text
-            print(stop_color)
+
+            if not auth_valid:
+                # Show auth error prominently
+                print(f"{stop_icon} Stopped | ⚠ YTM Auth invalid")
+                print(f"{stop_icon} Auth invalid")  # Short text
+                print("#FF0000")  # Red color for auth error
+            else:
+                print(f"{stop_icon} Stopped")
+                print(f"{stop_icon} Stopped")  # Short text
+                print(stop_color)
             sys.stdout.flush()
             client.close()
             sys.exit(0)
