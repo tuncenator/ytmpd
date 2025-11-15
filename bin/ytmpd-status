@@ -1133,16 +1133,15 @@ def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
                 if sync_status == "unresolved":
                     # YouTube track not yet resolved
                     context_suffix = " [Resolving...]"
-                elif playlist_ctx.get("current_pos") and playlist_ctx.get("total"):
+                elif (
+                    args.show_position
+                    and playlist_ctx.get("current_pos")
+                    and playlist_ctx.get("total")
+                ):
                     pos = playlist_ctx["current_pos"]
                     total = playlist_ctx["total"]
-                    # Show position for first, last, or single-track playlists
-                    if total == 1:
-                        context_suffix = " [1/1]"
-                    elif pos == 1:
-                        context_suffix = f" [1/{total}]"
-                    elif pos == total:
-                        context_suffix = f" [{total}/{total}]"
+                    # Show position for all tracks when enabled
+                    context_suffix = f" [{pos}/{total}]"
 
                 # Use adaptive truncation that protects timestamps
                 output = adaptive_truncate_status(
@@ -1522,16 +1521,15 @@ def main() -> None:
             if sync_status == "unresolved":
                 # YouTube track not yet resolved
                 context_suffix = " [Resolving...]"
-            elif playlist_ctx["current_pos"] is not None and playlist_ctx["total"] is not None:
+            elif (
+                args.show_position
+                and playlist_ctx["current_pos"] is not None
+                and playlist_ctx["total"] is not None
+            ):
                 pos = playlist_ctx["current_pos"]
                 total = playlist_ctx["total"]
-                # Show position for first, last, or single track
-                if total == 1:
-                    context_suffix = " [1/1]"
-                elif pos == 1:
-                    context_suffix = f" [1/{total}]"
-                elif pos == total:
-                    context_suffix = f" [{total}/{total}]"
+                # Show position for all tracks when enabled
+                context_suffix = f" [{pos}/{total}]"
 
             # Use adaptive truncation that protects timestamps
             output = adaptive_truncate_status(
