@@ -3,7 +3,7 @@
 > **Living document** -- each phase updates this with new discoveries and changes.
 > Read this before exploring the codebase. It may already have what you need.
 >
-> Last updated by: Phase 2 - Daemon Auto-Refresh Integration (2026-03-30)
+> Last updated by: Phase 3 - Notifications, CLI, and i3blocks Integration (2026-03-30)
 
 ---
 
@@ -28,7 +28,8 @@
 
 | File Path | Purpose | Notes |
 |-----------|---------|-------|
-| `ytmpd/daemon.py` | Main daemon class, socket server, thread management, auto-auth | `_auto_auth_loop()`: proactive refresh thread. `_attempt_auto_refresh()`: cookie extraction + client reinit. `_perform_sync()`: reactive refresh on auth failure. `_cmd_status()`: includes auto-auth fields |
+| `ytmpd/daemon.py` | Main daemon class, socket server, thread management, auto-auth | `_auto_auth_loop()`: proactive refresh thread + notification on failure. `_attempt_auto_refresh()`: cookie extraction + client reinit. `_perform_sync()`: reactive refresh on auth failure + notification. `_cmd_status()`: includes auto-auth fields |
+| `ytmpd/notify.py` | Desktop notification via notify-send | `send_notification()`: rate-limited (1/hour), handles missing notify-send gracefully |
 | `ytmpd/ytmusic.py` | YouTube Music API wrapper via ytmusicapi | `refresh_auth()`: reinitialize client with fresh credentials. `is_authenticated()`: cached 5-min auth check |
 | `ytmpd/config.py` (209 lines) | Config loading, validation, defaults | `load_config()` merges user YAML with defaults. `get_config_dir()` returns `~/.config/ytmpd/` |
 | `ytmpd/exceptions.py` | Custom exception hierarchy | `YTMusicAuthError` for auth failures, `CookieExtractionError` for cookie extraction. All inherit from `YTMPDError` |
@@ -39,12 +40,13 @@
 | `ytmpd/track_store.py` (205 lines) | SQLite metadata storage | Thread-safe with locks |
 | `ytmpd/rating.py` (180 lines) | Like/dislike state machine | RatingManager, RatingState, RatingAction |
 | `ytmpd/__main__.py` (66 lines) | Entry point | `python -m ytmpd` starts daemon |
-| `bin/ytmpctl` | CLI client for daemon commands | `cmd_auth()` at line 775, `cmd_status()` at line 181 |
-| `bin/ytmpd-status` | i3blocks status display script | `get_auth_status()` at lines 56-98, color-coded output |
+| `bin/ytmpctl` | CLI client for daemon commands | `cmd_auth(auto=False)` supports `--auto` flag for cookie extraction, `cmd_status()` shows auto-auth info |
+| `bin/ytmpd-status` | i3blocks status display script | `get_auth_status()` returns `(bool, str, int)` 3-tuple with auth_valid, error, auto_refresh_failures. Color overrides: red on auth failure, orange on refresh failures |
 | `examples/config.yaml` | Example configuration | All config keys documented with comments, includes `auto_auth` section |
 | `ytmpd/cookie_extract.py` | Firefox cookie extraction module | `FirefoxCookieExtractor` class: profile detection, cookie extraction, browser.json generation |
 | `tests/test_cookie_extract.py` | Unit tests for cookie extraction | 33 tests covering all methods and edge cases |
 | `tests/test_auto_auth_daemon.py` | Tests for daemon auto-auth integration | 21 tests: refresh_auth, proactive/reactive refresh, cooldown, status, state persistence |
+| `tests/test_notify.py` | Tests for notification module | 11 tests: send, urgency, icon, missing notify-send, rate limiting |
 
 ---
 
@@ -92,6 +94,15 @@ class FirefoxCookieExtractor:
     def extract_cookies(self, domain: str = ".youtube.com") -> list[dict]  # Temp-copy & query cookies.sqlite
     def build_browser_json(self, output_path: Path) -> Path  # Full pipeline: extract -> validate -> write JSON
     def validate_cookies(self, cookies: list[dict]) -> bool  # Check required cookies present & not expired
+```
+
+### Notification (`ytmpd/notify.py`)
+
+```python
+def send_notification(
+    title: str, message: str, urgency: str = "normal", icon: str = "dialog-warning"
+) -> bool
+# Rate-limited to max 1 per hour (module-level state). Returns True if sent.
 ```
 
 ### Config (`ytmpd/config.py`)
@@ -219,3 +230,4 @@ auto_auth:
 - **Phase 0 (Setup)**: Initial codebase exploration and documentation. Proved cookie extraction from Firefox Dev Edition works with ytmusicapi authentication.
 - **Phase 1 (Cookie Extraction Module)**: Created `ytmpd/cookie_extract.py` with `FirefoxCookieExtractor` class. Added `CookieExtractionError` to exceptions. Added `auto_auth` config section with defaults, deep-merge, and validation. Updated `examples/config.yaml`. 33 unit tests.
 - **Phase 2 (Daemon Auto-Refresh Integration)**: Added `refresh_auth()` to `YTMusicClient`. Added `_auto_auth_loop()` proactive refresh thread, `_attempt_auto_refresh()` with atomic file write, reactive refresh in `_perform_sync()` with 5-min cooldown. Updated `_cmd_status()` with auto-auth fields. State persistence for `last_auto_refresh` and `auto_refresh_failures`. 21 tests.
+- **Phase 3 (Notifications, CLI, i3blocks)**: Created `ytmpd/notify.py` with rate-limited `send_notification()`. Added notification triggers in daemon after proactive/reactive refresh failures. Added `ytmpctl auth --auto` command. Updated `ytmpctl status` with auto-auth display. Updated `bin/ytmpd-status` with auth-aware color coding (red/orange). Updated `get_auth_status()` to return 3-tuple. 11 tests.

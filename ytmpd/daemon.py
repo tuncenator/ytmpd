@@ -19,6 +19,7 @@ from ytmpd.cookie_extract import FirefoxCookieExtractor
 from ytmpd.exceptions import CookieExtractionError, MPDConnectionError
 from ytmpd.icy_proxy import ICYProxyServer
 from ytmpd.mpd_client import MPDClient
+from ytmpd.notify import send_notification
 from ytmpd.stream_resolver import StreamResolver
 from ytmpd.sync_engine import SyncEngine
 from ytmpd.track_store import TrackStore
@@ -413,6 +414,12 @@ class YTMPDaemon:
                     logger.info("Proactive auto-auth refresh succeeded")
                 else:
                     logger.warning("Proactive auto-auth refresh failed")
+                    send_notification(
+                        "ytmpd: Auth Refresh Failed",
+                        "Proactive cookie refresh failed. "
+                        "Open YouTube Music in Firefox to refresh cookies.",
+                        urgency="normal",
+                    )
 
         except Exception as e:
             logger.error(f"Error in auto-auth loop: {e}", exc_info=True)
@@ -546,6 +553,12 @@ class YTMPDaemon:
                                 e = retry_e  # Use the retry error for state
                         else:
                             logger.error("Reactive auto-auth refresh failed")
+                            send_notification(
+                                "ytmpd: Authentication Failed",
+                                "Auto-refresh failed. "
+                                "Open YouTube Music in Firefox to refresh cookies.",
+                                urgency="critical",
+                            )
                     else:
                         logger.info("Skipping reactive refresh (cooldown active)")
 
