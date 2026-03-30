@@ -81,3 +81,9 @@ class URLRefreshError(ProxyError):
     """Raised when URL refresh fails."""
 
     pass
+
+
+class CookieExtractionError(YTMPDError):
+    """Raised when browser cookie extraction fails."""
+
+    pass

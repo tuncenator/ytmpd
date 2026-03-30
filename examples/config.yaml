@@ -107,3 +107,32 @@ proxy_track_mapping_db: ~/.config/ytmpd/track_mapping.db
 # Default: 25
 # Valid range: 10-50
 radio_playlist_limit: 25
+
+# ===== Auto-Authentication Settings =====
+
+# Automatically refresh YouTube Music authentication by extracting cookies
+# from your Firefox browser. Eliminates the need to manually paste headers.
+auto_auth:
+  # Enable automatic cookie extraction and browser.json refresh
+  # Default: false
+  enabled: false
+
+  # Browser to extract cookies from: "firefox" or "firefox-dev"
+  # Default: firefox-dev
+  browser: firefox-dev
+
+  # Firefox Multi-Account Container name to extract cookies from
+  # Set to null (or omit) for the default/no-container context
+  # Set to a container name string (e.g., "Personal") to use that container
+  # Default: null (no container)
+  container: null
+
+  # Firefox profile directory name (e.g., "4wkrywqj.dev-edition-default")
+  # Set to null (or omit) to auto-detect from profiles.ini
+  # Default: null (auto-detect)
+  profile: null
+
+  # How often to proactively refresh cookies (in hours)
+  # The daemon will periodically re-extract cookies and rebuild browser.json
+  # Default: 12
+  refresh_interval_hours: 12

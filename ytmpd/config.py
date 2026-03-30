@@ -59,6 +59,14 @@ def load_config() -> dict[str, Any]:
         "proxy_track_mapping_db": str(config_dir / "track_mapping.db"),
         # Radio feature settings
         "radio_playlist_limit": 25,
+        # Auto-authentication settings
+        "auto_auth": {
+            "enabled": False,
+            "browser": "firefox-dev",
+            "container": None,
+            "profile": None,
+            "refresh_interval_hours": 12,
+        },
     }
 
     # Load existing config or create default
@@ -69,6 +77,11 @@ def load_config() -> dict[str, Any]:
                 user_config = yaml.safe_load(f) or {}
             # Merge user config with defaults (user config takes precedence)
             config = {**default_config, **user_config}
+            # Deep-merge nested dicts (auto_auth)
+            for key in ("auto_auth",):
+                if key in default_config and isinstance(default_config[key], dict):
+                    merged = {**default_config[key], **(user_config.get(key) or {})}
+                    config[key] = merged
         except Exception as e:
             logger.warning(f"Error loading config file, using defaults: {e}")
             config = default_config
@@ -205,5 +218,34 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 f"radio_playlist_limit must be an integer between 10 and 50, got: {limit}"
             )
+
+    # Validate auto_auth section
+    if "auto_auth" in config:
+        aa = config["auto_auth"]
+        if not isinstance(aa, dict):
+            raise ValueError(f"auto_auth must be a mapping, got: {type(aa)}")
+        if "enabled" in aa and not isinstance(aa["enabled"], bool):
+            raise ValueError(f"auto_auth.enabled must be a boolean, got: {type(aa['enabled'])}")
+        if "browser" in aa:
+            if aa["browser"] not in ("firefox", "firefox-dev"):
+                raise ValueError(
+                    f"auto_auth.browser must be 'firefox' or 'firefox-dev', got: {aa['browser']!r}"
+                )
+        if "container" in aa and aa["container"] is not None:
+            if not isinstance(aa["container"], str):
+                raise ValueError(
+                    f"auto_auth.container must be null or a string, got: {type(aa['container'])}"
+                )
+        if "profile" in aa and aa["profile"] is not None:
+            if not isinstance(aa["profile"], str):
+                raise ValueError(
+                    f"auto_auth.profile must be null or a string, got: {type(aa['profile'])}"
+                )
+        if "refresh_interval_hours" in aa:
+            rih = aa["refresh_interval_hours"]
+            if not isinstance(rih, int | float) or rih <= 0:
+                raise ValueError(
+                    f"auto_auth.refresh_interval_hours must be a positive number, got: {rih}"
+                )
 
     return config
