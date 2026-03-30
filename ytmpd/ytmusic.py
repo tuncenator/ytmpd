@@ -126,6 +126,28 @@ class YTMusicClient:
             logger.error(f"Failed to initialize YouTube Music client: {e}")
             raise YTMusicAuthError(f"Authentication failed: {e}") from e
 
+    def refresh_auth(self, auth_file: Path | None = None) -> bool:
+        """Reinitialize the client with fresh credentials.
+
+        Args:
+            auth_file: Path to new browser.json. If None, uses self.auth_file.
+
+        Returns:
+            True if reinitialization succeeded, False otherwise.
+        """
+        if auth_file is not None:
+            self.auth_file = auth_file
+
+        try:
+            self._init_client()
+            # Reset the auth cache so next is_authenticated() does a fresh check
+            self._auth_cache_time = 0.0
+            logger.info("Successfully refreshed YouTube Music authentication")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to refresh authentication: {_truncate_error(e)}")
+            return False
+
     def is_authenticated(self) -> tuple[bool, str]:
         """Check if the client is properly authenticated with YouTube Music.
 
