@@ -208,6 +208,20 @@ def cmd_status() -> None:
         if auth_error:
             print(f"  Error: {auth_error}")
             print(f"  Run: {colorize('ytmpctl auth', 'blue')} to re-authenticate")
+
+    # Auto-auth status
+    auto_auth_enabled = result.get("auto_auth_enabled", False)
+    if auto_auth_enabled:
+        print(f"Auto-auth: {colorize('Enabled', 'green')}")
+        last_refresh = format_datetime(result.get("last_auto_refresh"))
+        print(f"  Last refresh: {last_refresh}")
+        failures = result.get("auto_refresh_failures", 0)
+        if failures > 0:
+            print(f"  Refresh failures: {colorize(str(failures), 'yellow')}")
+        else:
+            print(f"  Refresh failures: {failures}")
+    else:
+        print("Auto-auth: Disabled")
     print()
 
     # Sync in progress indicator
@@ -772,18 +786,54 @@ def cmd_dislike() -> None:
         sys.exit(1)
 
 
-def cmd_auth() -> None:
-    """Set up or refresh YouTube Music authentication."""
-    from ytmpd.ytmusic import YTMusicClient
+def cmd_auth(auto: bool = False) -> None:
+    """Set up or refresh YouTube Music authentication.
 
-    try:
-        YTMusicClient.setup_browser()
-    except KeyboardInterrupt:
-        print("\nAuthentication cancelled")
-        sys.exit(1)
-    except Exception as e:
-        print(colorize(f"✗ Authentication failed: {e}", "red"), file=sys.stderr)
-        sys.exit(1)
+    Args:
+        auto: If True, extract cookies from Firefox instead of manual setup.
+    """
+    if auto:
+        from ytmpd.config import get_config_dir, load_config
+        from ytmpd.cookie_extract import FirefoxCookieExtractor
+        from ytmpd.exceptions import CookieExtractionError
+
+        try:
+            config = load_config()
+            auto_auth = config.get("auto_auth", {})
+
+            extractor = FirefoxCookieExtractor(
+                browser=auto_auth.get("browser", "firefox-dev"),
+                profile=auto_auth.get("profile"),
+                container=auto_auth.get("container"),
+            )
+
+            output_path = get_config_dir() / "browser.json"
+            extractor.build_browser_json(output_path)
+
+            check = "OK"
+            print(colorize(f"{check} browser.json updated from Firefox cookies.", "green"))
+            print("Daemon will pick up new credentials automatically.")
+
+        except CookieExtractionError as e:
+            cross = "ERROR"
+            print(colorize(f"{cross} Cookie extraction failed: {e}", "red"), file=sys.stderr)
+            print("Make sure Firefox is running with an active Google session.", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            cross = "ERROR"
+            print(colorize(f"{cross} Auto-auth failed: {e}", "red"), file=sys.stderr)
+            sys.exit(1)
+    else:
+        from ytmpd.ytmusic import YTMusicClient
+
+        try:
+            YTMusicClient.setup_browser()
+        except KeyboardInterrupt:
+            print("\nAuthentication cancelled")
+            sys.exit(1)
+        except Exception as e:
+            print(colorize(f"Authentication failed: {e}", "red"), file=sys.stderr)
+            sys.exit(1)
 
 
 def show_help() -> None:
@@ -800,6 +850,7 @@ def show_help() -> None:
   ytmpctl like              Toggle like for current track
   ytmpctl dislike           Toggle dislike for current track
   ytmpctl auth              Set up or refresh YouTube Music authentication
+  ytmpctl auth --auto       Auto-refresh browser.json from Firefox cookies
   ytmpctl help              Show this help message
 
 {colorize("Playback Control:", "bold")}
@@ -872,7 +923,8 @@ def main() -> NoReturn:
     elif command == "dislike":
         cmd_dislike()
     elif command == "auth":
-        cmd_auth()
+        auto = "--auto" in args
+        cmd_auth(auto=auto)
     elif command == "help" or command == "--help" or command == "-h":
         show_help()
     else:

@@ -53,18 +53,19 @@ from mpd import MPDClient  # noqa: E402
 __version__ = "2.1.0"
 
 
-def get_auth_status() -> tuple[bool, str]:
+def get_auth_status() -> tuple[bool, str, int]:
     """Check authentication status from ytmpd daemon.
 
     Returns:
-        Tuple of (is_valid, error_message). error_message is empty string if valid.
-        Returns (True, "") if daemon is not running (can't check).
+        Tuple of (is_valid, error_message, auto_refresh_failures).
+        error_message is empty string if valid.
+        Returns (True, "", 0) if daemon is not running (can't check).
     """
     try:
         socket_path = Path.home() / ".config" / "ytmpd" / "sync_socket"
         if not socket_path.exists():
             # Daemon not running, can't check auth
-            return True, ""
+            return True, "", 0
 
         # Connect to Unix socket
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -90,12 +91,13 @@ def get_auth_status() -> tuple[bool, str]:
         result = json.loads(response.decode("utf-8").strip())
         auth_valid = result.get("auth_valid", True)
         auth_error = result.get("auth_error", "")
+        auto_refresh_failures = result.get("auto_refresh_failures", 0)
 
-        return auth_valid, auth_error
+        return auth_valid, auth_error, auto_refresh_failures
 
     except Exception:
         # If any error, assume auth is ok (we just can't check)
-        return True, ""
+        return True, "", 0
 
 
 def get_mpd_client(host: str = "localhost", port: int = 6601) -> MPDClient | None:
@@ -1353,15 +1355,19 @@ def main() -> None:
 
     if client is None:
         # MPD not running - check auth status to help diagnose issues
-        auth_valid, auth_error = get_auth_status()
+        auth_valid, auth_error, auto_refresh_failures = get_auth_status()
         stop_icon = args.icon_stopped
         stop_color = args.color_stopped
 
         if not auth_valid:
             # Show auth error prominently
-            print(f"{stop_icon} MPD stopped | ⚠ Auth invalid")
+            print(f"{stop_icon} MPD stopped | Auth invalid")
             print(f"{stop_icon} Auth invalid")  # Short text
             print("#FF0000")  # Red color for auth error
+        elif auto_refresh_failures > 0:
+            print(f"{stop_icon} MPD stopped | Auth refresh failing")
+            print(f"{stop_icon} MPD stopped")  # Short text
+            print("#FFA500")  # Orange for refresh failures
         else:
             print(f"{stop_icon} MPD stopped")
             print(f"{stop_icon} MPD stopped")  # Short text
@@ -1383,15 +1389,19 @@ def main() -> None:
 
         if state == "stop" or not current_song:
             # Check auth status when stopped - helps diagnose sync issues
-            auth_valid, auth_error = get_auth_status()
+            auth_valid, auth_error, auto_refresh_failures = get_auth_status()
             stop_icon = args.icon_stopped
             stop_color = args.color_stopped
 
             if not auth_valid:
                 # Show auth error prominently
-                print(f"{stop_icon} Stopped | ⚠ YTM Auth invalid")
+                print(f"{stop_icon} Stopped | YTM Auth invalid")
                 print(f"{stop_icon} Auth invalid")  # Short text
                 print("#FF0000")  # Red color for auth error
+            elif auto_refresh_failures > 0:
+                print(f"{stop_icon} Stopped | Auth refresh failing")
+                print(f"{stop_icon} Stopped")  # Short text
+                print("#FFA500")  # Orange for refresh failures
             else:
                 print(f"{stop_icon} Stopped")
                 print(f"{stop_icon} Stopped")  # Short text
@@ -1432,6 +1442,13 @@ def main() -> None:
         else:
             icon = args.icon_stopped
             color = args.color_stopped
+
+        # Override color on auth failure or refresh failures
+        auth_valid, _auth_error, auto_refresh_failures = get_auth_status()
+        if not auth_valid:
+            color = "#FF0000"  # Red for auth failure
+        elif auto_refresh_failures > 0:
+            color = "#FFA500"  # Orange for refresh failures
 
         # Get playlist context
         playlist_ctx = get_playlist_context(client)

@@ -15,9 +15,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ytmpd.config import get_config_dir, load_config
-from ytmpd.exceptions import MPDConnectionError
+from ytmpd.cookie_extract import FirefoxCookieExtractor
+from ytmpd.exceptions import CookieExtractionError, MPDConnectionError
 from ytmpd.icy_proxy import ICYProxyServer
 from ytmpd.mpd_client import MPDClient
+from ytmpd.notify import send_notification
 from ytmpd.stream_resolver import StreamResolver
 from ytmpd.sync_engine import SyncEngine
 from ytmpd.track_store import TrackStore
@@ -133,6 +135,7 @@ class YTMPDaemon:
         self._sync_thread: threading.Thread | None = None
         self._socket_thread: threading.Thread | None = None
         self._proxy_thread: threading.Thread | None = None
+        self._auto_auth_thread: threading.Thread | None = None
         self._sync_in_progress = False
         self._sync_lock = threading.Lock()
 
@@ -142,6 +145,18 @@ class YTMPDaemon:
         # Async event loop for proxy server (if enabled)
         self._proxy_loop: asyncio.AbstractEventLoop | None = None
         self._proxy_shutdown_event: asyncio.Event | None = None
+
+        # Auto-auth configuration
+        self.auto_auth_config = self.config.get("auto_auth", {})
+        self._auto_auth_enabled = self.auto_auth_config.get("enabled", False)
+        self._auto_auth_shutdown = threading.Event()
+        self._last_reactive_refresh: float = 0.0
+        self._reactive_refresh_cooldown: float = 300.0  # 5 minutes
+
+        if self._auto_auth_enabled:
+            logger.info("Auto-auth enabled (browser: %s)", self.auto_auth_config.get("browser"))
+        else:
+            logger.info("Auto-auth disabled")
 
         logger.info("Daemon components initialized")
 
@@ -179,6 +194,12 @@ class YTMPDaemon:
             self._proxy_thread = threading.Thread(target=self._run_proxy_server, daemon=True)
             self._proxy_thread.start()
 
+        # Start auto-auth refresh thread if enabled
+        if self._auto_auth_enabled:
+            logger.info("Starting auto-auth refresh thread...")
+            self._auto_auth_thread = threading.Thread(target=self._auto_auth_loop, daemon=True)
+            self._auto_auth_thread.start()
+
         logger.info("ytmpd daemon started successfully")
 
         # Perform initial sync immediately
@@ -212,6 +233,9 @@ class YTMPDaemon:
 
         logger.info("Stopping ytmpd daemon...")
         self._running = False
+
+        # Signal auto-auth thread to stop
+        self._auto_auth_shutdown.set()
 
         # Note: Sync will detect _running=False and cancel itself gracefully
         if self._sync_in_progress:
@@ -283,6 +307,8 @@ class YTMPDaemon:
             threads_alive.append("socket")
         if self._proxy_thread and self._proxy_thread.is_alive():
             threads_alive.append("proxy")
+        if self._auto_auth_thread and self._auto_auth_thread.is_alive():
+            threads_alive.append("auto_auth")
 
         if threads_alive:
             logger.warning(f"Daemon stopping with threads still alive: {', '.join(threads_alive)}")
@@ -365,6 +391,85 @@ class YTMPDaemon:
                 self._proxy_loop.close()
             logger.info("Proxy server thread stopped")
 
+    def _auto_auth_loop(self) -> None:
+        """Background thread for periodic auto-auth refresh."""
+        logger.info("Starting auto-auth refresh loop")
+
+        interval_hours = self.auto_auth_config.get("refresh_interval_hours", 12)
+        interval_seconds = interval_hours * 3600
+
+        try:
+            while self._running:
+                # Wait for the configured interval (or shutdown signal)
+                if self._auto_auth_shutdown.wait(timeout=interval_seconds):
+                    # Shutdown was signalled
+                    break
+
+                if not self._running:
+                    break
+
+                logger.info("Proactive auto-auth refresh triggered")
+                success = self._attempt_auto_refresh()
+                if success:
+                    logger.info("Proactive auto-auth refresh succeeded")
+                else:
+                    logger.warning("Proactive auto-auth refresh failed")
+                    send_notification(
+                        "ytmpd: Auth Refresh Failed",
+                        "Proactive cookie refresh failed. "
+                        "Open YouTube Music in Firefox to refresh cookies.",
+                        urgency="normal",
+                    )
+
+        except Exception as e:
+            logger.error(f"Error in auto-auth loop: {e}", exc_info=True)
+
+        logger.info("Auto-auth refresh loop stopped")
+
+    def _attempt_auto_refresh(self) -> bool:
+        """Attempt to refresh authentication via cookie extraction.
+
+        Returns:
+            True if refresh succeeded, False otherwise.
+        """
+        config_dir = get_config_dir()
+        browser_json = config_dir / "browser.json"
+
+        try:
+            extractor = FirefoxCookieExtractor(
+                browser=self.auto_auth_config.get("browser", "firefox-dev"),
+                profile=self.auto_auth_config.get("profile"),
+                container=self.auto_auth_config.get("container"),
+            )
+
+            # Write to a temp file first, then rename for atomicity
+            tmp_path = browser_json.with_suffix(".json.tmp")
+            extractor.build_browser_json(tmp_path)
+            tmp_path.rename(browser_json)
+
+            # Reinitialize the ytmusicapi client
+            if not self.ytmusic_client.refresh_auth(browser_json):
+                self.state["auto_refresh_failures"] = self.state.get("auto_refresh_failures", 0) + 1
+                self._save_state()
+                return False
+
+            # Update state on success
+            self.state["last_auto_refresh"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            self.state["auto_refresh_failures"] = 0
+            self._save_state()
+            return True
+
+        except CookieExtractionError as e:
+            logger.error(f"Cookie extraction failed: {e}")
+            self.state["auto_refresh_failures"] = self.state.get("auto_refresh_failures", 0) + 1
+            self._save_state()
+            return False
+        except Exception as e:
+            logger.error(f"Auto-auth refresh failed: {e}", exc_info=True)
+            self.state["auto_refresh_failures"] = self.state.get("auto_refresh_failures", 0) + 1
+            self._save_state()
+            return False
+
     def _perform_sync(self) -> None:
         """Execute sync and update state."""
         # Skip if sync already in progress
@@ -414,6 +519,49 @@ class YTMPDaemon:
 
             except Exception as e:
                 logger.error(f"Sync failed with exception: {e}", exc_info=True)
+
+                # Attempt reactive auto-refresh on auth-related failures
+                is_auth_error = any(
+                    kw in str(e).lower()
+                    for kw in ("auth", "credential", "unauthorized", "forbidden")
+                )
+                if is_auth_error and self._auto_auth_enabled:
+                    now = time.time()
+                    if now - self._last_reactive_refresh >= self._reactive_refresh_cooldown:
+                        logger.info("Attempting reactive auto-auth refresh after auth failure")
+                        self._last_reactive_refresh = now
+                        if self._attempt_auto_refresh():
+                            logger.info("Reactive refresh succeeded, retrying sync")
+                            try:
+                                result = self.sync_engine.sync_all_playlists()
+                                self.state["last_sync"] = (
+                                    datetime.now(UTC).isoformat().replace("+00:00", "Z")
+                                )
+                                self.state["last_sync_result"] = {
+                                    "success": result.success,
+                                    "playlists_synced": result.playlists_synced,
+                                    "playlists_failed": result.playlists_failed,
+                                    "tracks_added": result.tracks_added,
+                                    "tracks_failed": result.tracks_failed,
+                                    "duration_seconds": result.duration_seconds,
+                                    "errors": result.errors,
+                                }
+                                self._save_state()
+                                return
+                            except Exception as retry_e:
+                                logger.error(f"Sync retry after refresh also failed: {retry_e}")
+                                e = retry_e  # Use the retry error for state
+                        else:
+                            logger.error("Reactive auto-auth refresh failed")
+                            send_notification(
+                                "ytmpd: Authentication Failed",
+                                "Auto-refresh failed. "
+                                "Open YouTube Music in Firefox to refresh cookies.",
+                                urgency="critical",
+                            )
+                    else:
+                        logger.info("Skipping reactive refresh (cooldown active)")
+
                 # Update state with failure
                 self.state["last_sync"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
                 self.state["last_sync_result"] = {
@@ -591,6 +739,9 @@ class YTMPDaemon:
             "last_sync_success": last_sync_result.get("success", False),
             "auth_valid": auth_valid,
             "auth_error": auth_error,
+            "auto_auth_enabled": self._auto_auth_enabled,
+            "last_auto_refresh": self.state.get("last_auto_refresh"),
+            "auto_refresh_failures": self.state.get("auto_refresh_failures", 0),
         }
 
     def _cmd_list(self) -> dict[str, Any]:
@@ -1017,26 +1168,29 @@ class YTMPDaemon:
         Returns:
             State dictionary.
         """
+        default_state = {
+            "last_sync": None,
+            "last_sync_result": {},
+            "daemon_start_time": None,
+            "last_auto_refresh": None,
+            "auto_refresh_failures": 0,
+        }
+
         if not self.state_file.exists():
             logger.info("No state file found, starting fresh")
-            return {
-                "last_sync": None,
-                "last_sync_result": {},
-                "daemon_start_time": None,
-            }
+            return dict(default_state)
 
         try:
             with open(self.state_file) as f:
                 state = json.load(f)
+            # Ensure all default keys exist (for upgrades from older state files)
+            for key, value in default_state.items():
+                state.setdefault(key, value)
             logger.info(f"State loaded from {self.state_file}")
             return state
         except Exception as e:
             logger.warning(f"Error loading state file: {e}, starting fresh")
-            return {
-                "last_sync": None,
-                "last_sync_result": {},
-                "daemon_start_time": None,
-            }
+            return dict(default_state)
 
     def _save_state(self) -> None:
         """Save state to sync_state.json."""

@@ -41,6 +41,90 @@ YouTube Music Playlists
 - **MPD-native playback**: Leverage MPD's robust audio playback instead of custom implementation
 - **i3blocks integration**: Status display shows MPD playback state
 
+## Auto-Authentication
+
+ytmpd can automatically refresh YouTube Music authentication by extracting cookies directly from your Firefox browser. This eliminates the need to manually paste request headers when your session expires.
+
+### How It Works
+
+1. The daemon periodically reads cookies from your Firefox profile's SQLite database
+2. It rebuilds `browser.json` with fresh cookies and a valid SAPISIDHASH
+3. The ytmusicapi client is reinitialized with the new credentials
+4. If a sync fails due to expired auth, it attempts an immediate refresh before retrying
+
+### Prerequisites
+
+- **Firefox** (standard or Developer Edition) with an active Google/YouTube Music session
+- You must be logged in to YouTube Music in Firefox -- ytmpd reads your existing session cookies
+- Firefox Multi-Account Containers support is included if you use containerized accounts
+
+### Enabling Auto-Auth
+
+Add to `~/.config/ytmpd/config.yaml`:
+
+```yaml
+auto_auth:
+  enabled: true
+  browser: firefox-dev   # or "firefox" for standard Firefox
+```
+
+Restart the daemon to apply.
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enabled` | `false` | Enable automatic cookie extraction |
+| `browser` | `firefox-dev` | Browser to extract from: `firefox` or `firefox-dev` |
+| `container` | `null` | Firefox container name, or null for default context |
+| `profile` | `null` | Explicit profile dir name, or null to auto-detect |
+| `refresh_interval_hours` | `12` | How often to proactively refresh cookies |
+
+### Manual Trigger
+
+You can trigger a one-time cookie extraction without the daemon running:
+
+```bash
+ytmpctl auth --auto
+```
+
+This reads your Firefox cookies, rebuilds `browser.json`, and exits. Useful for initial setup or debugging.
+
+### What Happens When Cookies Expire
+
+YouTube session cookies typically last a long time, but they can expire if you:
+- Clear browser data
+- Log out of Google in Firefox
+- Haven't opened Firefox in an extended period
+
+When cookies expire:
+1. The proactive refresh detects invalid cookies during its scheduled run
+2. A desktop notification alerts you (via `notify-send`, rate-limited to 1/hour)
+3. The i3blocks widget turns orange (refresh failures) or red (auth invalid)
+4. Fix: Log in to YouTube Music in Firefox, and the next refresh cycle will pick up the new cookies
+
+### Troubleshooting
+
+**"Firefox profiles.ini not found"**
+- Firefox is not installed, or the profile directory is non-standard
+- Check that `~/.mozilla/firefox/profiles.ini` exists
+
+**"No firefox-dev installation found"**
+- You set `browser: firefox-dev` but only have standard Firefox (or vice versa)
+- Change `browser` to match your installed Firefox variant
+
+**"cookies.sqlite not found"**
+- The Firefox profile exists but has no cookie database
+- This can happen with a brand-new profile -- browse to YouTube Music first
+
+**"Container X not found"**
+- The container name in config doesn't match any container in Firefox
+- Check your container names in Firefox settings or set `container: null`
+
+**"Cookie validation failed"**
+- Required cookies are missing or expired in Firefox
+- Log in to YouTube Music in Firefox and try again
+
 ## ICY Metadata Proxy
 
 ytmpd includes a built-in streaming proxy that enables MPD clients to display track metadata (artist, title) instead of raw YouTube URLs.
@@ -695,14 +779,16 @@ See `examples/config.yaml` for documentation of all options.
 
 **Solutions**:
 
-1. **Refresh browser authentication:**
+1. **If auto-auth is enabled:** Check that you're logged in to YouTube Music in Firefox, then wait for the next refresh cycle or run `ytmpctl auth --auto` manually.
+
+2. **Refresh browser authentication manually:**
    ```bash
    python -m ytmpd.ytmusic setup-browser
    ```
 
-2. Make sure you're logged in to YouTube Music in your browser before extracting headers
+3. Make sure you're logged in to YouTube Music in your browser before extracting headers
 
-3. Try using a different browser or incognito mode to get fresh headers
+4. Try using a different browser or incognito mode to get fresh headers
 
 ### i3blocks not updating
 
@@ -835,8 +921,10 @@ ytmpd/
 │   ├── __init__.py
 │   ├── __main__.py             # Daemon entry point
 │   ├── config.py               # Configuration management
+│   ├── cookie_extract.py       # Firefox cookie extraction for auto-auth
 │   ├── daemon.py               # Main sync daemon
 │   ├── mpd_client.py           # MPD client wrapper (python-mpd2)
+│   ├── notify.py               # Desktop notifications via notify-send
 │   ├── ytmusic.py              # YouTube Music API wrapper
 │   ├── stream_resolver.py      # Video ID → stream URL resolver
 │   ├── sync_engine.py          # Sync orchestration
