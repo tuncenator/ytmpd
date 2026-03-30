@@ -149,6 +149,16 @@ Example:
 
 ---
 
+## Codebase Context Updates
+
+[List what you added or changed in CODEBASE_CONTEXT.md during this phase]
+
+Example:
+- Added `src/auth/middleware.py` to Key Files (new file created this phase)
+- Added `AuthService.validate_token()` to APIs section
+- Updated Data Models with `SessionToken` entity
+- Removed `OldAuthHelper` from Key Files (deleted this phase)
+
 ## Notes for Future Phases
 
 [Any important information, warnings, or suggestions for agents working on future phases]

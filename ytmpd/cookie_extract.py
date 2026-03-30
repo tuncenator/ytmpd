@@ -164,19 +164,13 @@ class FirefoxCookieExtractor:
             try:
                 conn = sqlite3.connect(f"file:{tmp_db}?mode=ro", uri=True)
                 conn.row_factory = sqlite3.Row
+            except sqlite3.DatabaseError as e:
+                raise CookieExtractionError(f"Cookie database is corrupt or unreadable: {e}") from e
             except sqlite3.Error as e:
                 raise CookieExtractionError(f"Failed to open cookie database: {e}") from e
 
             try:
-                cursor = conn.execute(
-                    "SELECT name, value, host, expiry, isSecure "
-                    "FROM moz_cookies "
-                    "WHERE host LIKE ? AND originAttributes = ?",
-                    (f"%{domain}", origin_filter),
-                )
-                cookies = [dict(row) for row in cursor.fetchall()]
-            except sqlite3.Error as e:
-                raise CookieExtractionError(f"Failed to query cookie database: {e}") from e
+                cookies = self._query_cookies_with_retry(conn, domain, origin_filter)
             finally:
                 conn.close()
         finally:
@@ -189,6 +183,58 @@ class FirefoxCookieExtractor:
             self.container,
         )
         return cookies
+
+    def _query_cookies_with_retry(
+        self,
+        conn: sqlite3.Connection,
+        domain: str,
+        origin_filter: str,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+    ) -> list[dict]:
+        """Query cookies from the database with retry on lock.
+
+        Args:
+            conn: SQLite connection.
+            domain: Domain filter for host LIKE query.
+            origin_filter: originAttributes filter value.
+            max_retries: Maximum number of attempts.
+            retry_delay: Seconds to wait between retries.
+
+        Returns:
+            List of cookie dicts.
+
+        Raises:
+            CookieExtractionError: If query fails after all retries.
+        """
+        last_error: sqlite3.Error | None = None
+        for attempt in range(max_retries):
+            try:
+                cursor = conn.execute(
+                    "SELECT name, value, host, expiry, isSecure "
+                    "FROM moz_cookies "
+                    "WHERE host LIKE ? AND originAttributes = ?",
+                    (f"%{domain}", origin_filter),
+                )
+                return [dict(row) for row in cursor.fetchall()]
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    logger.warning(
+                        "Cookie database locked, retrying in %ss (attempt %d/%d)",
+                        retry_delay,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    last_error = e
+                    time.sleep(retry_delay)
+                    continue
+                raise CookieExtractionError(f"Failed to query cookie database: {e}") from e
+            except sqlite3.Error as e:
+                raise CookieExtractionError(f"Failed to query cookie database: {e}") from e
+
+        raise CookieExtractionError(
+            f"Cookie database locked after {max_retries} attempts: {last_error}"
+        )
 
     def validate_cookies(self, cookies: list[dict]) -> bool:
         """Validate that required cookies are present and not expired.

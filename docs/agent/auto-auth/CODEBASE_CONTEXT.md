@@ -3,7 +3,7 @@
 > **Living document** -- each phase updates this with new discoveries and changes.
 > Read this before exploring the codebase. It may already have what you need.
 >
-> Last updated by: Phase 3 - Notifications, CLI, and i3blocks Integration (2026-03-30)
+> Last updated by: Phase 4 - Integration Testing and Documentation (2026-03-30)
 
 ---
 
@@ -47,6 +47,7 @@
 | `tests/test_cookie_extract.py` | Unit tests for cookie extraction | 33 tests covering all methods and edge cases |
 | `tests/test_auto_auth_daemon.py` | Tests for daemon auto-auth integration | 21 tests: refresh_auth, proactive/reactive refresh, cooldown, status, state persistence |
 | `tests/test_notify.py` | Tests for notification module | 11 tests: send, urgency, icon, missing notify-send, rate limiting |
+| `tests/integration/test_auto_auth.py` | Integration tests for auto-auth pipeline | 25 tests: full pipeline, edge cases, containers, profiles, validation, daemon status |
 
 ---
 
@@ -92,6 +93,7 @@ class FirefoxCookieExtractor:
     def __init__(self, browser: str = "firefox", profile: str | None = None, container: str | None = None)
     def find_profile_dir(self) -> Path  # Auto-detect or explicit Firefox profile
     def extract_cookies(self, domain: str = ".youtube.com") -> list[dict]  # Temp-copy & query cookies.sqlite
+    def _query_cookies_with_retry(self, conn, domain, origin_filter, max_retries=3, retry_delay=1.0) -> list[dict]  # Retry on locked DB
     def build_browser_json(self, output_path: Path) -> Path  # Full pipeline: extract -> validate -> write JSON
     def validate_cookies(self, cookies: list[dict]) -> bool  # Check required cookies present & not expired
 ```
@@ -218,7 +220,7 @@ auto_auth:
 - **Python**: 3.12+ with uv package manager
 - **Virtual env**: `.venv/` in project root
 - **Install**: `uv pip install -e ".[dev]"`
-- **Tests**: `pytest` (154 tests, 72% coverage), `pytest --cov=ytmpd`
+- **Tests**: `pytest` (541 passed, 7 pre-existing failures, 4 skipped), `pytest --cov=ytmpd`
 - **Linting**: `ruff check ytmpd/`, `ruff format ytmpd/`
 - **Type checking**: `mypy ytmpd/`
 - **Current version**: 1.4.4
@@ -231,3 +233,4 @@ auto_auth:
 - **Phase 1 (Cookie Extraction Module)**: Created `ytmpd/cookie_extract.py` with `FirefoxCookieExtractor` class. Added `CookieExtractionError` to exceptions. Added `auto_auth` config section with defaults, deep-merge, and validation. Updated `examples/config.yaml`. 33 unit tests.
 - **Phase 2 (Daemon Auto-Refresh Integration)**: Added `refresh_auth()` to `YTMusicClient`. Added `_auto_auth_loop()` proactive refresh thread, `_attempt_auto_refresh()` with atomic file write, reactive refresh in `_perform_sync()` with 5-min cooldown. Updated `_cmd_status()` with auto-auth fields. State persistence for `last_auto_refresh` and `auto_refresh_failures`. 21 tests.
 - **Phase 3 (Notifications, CLI, i3blocks)**: Created `ytmpd/notify.py` with rate-limited `send_notification()`. Added notification triggers in daemon after proactive/reactive refresh failures. Added `ytmpctl auth --auto` command. Updated `ytmpctl status` with auto-auth display. Updated `bin/ytmpd-status` with auth-aware color coding (red/orange). Updated `get_auth_status()` to return 3-tuple. 11 tests.
+- **Phase 4 (Integration Testing & Docs)**: Added `_query_cookies_with_retry()` with locked DB retry (3 attempts, 1s delay) and corrupt DB handling. Created 25 integration tests in `tests/integration/test_auto_auth.py`. Added Auto-Authentication section to README.md. Updated project structure in README.
