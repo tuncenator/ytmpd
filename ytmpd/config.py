@@ -67,6 +67,11 @@ def load_config() -> dict[str, Any]:
             "profile": None,
             "refresh_interval_hours": 12,
         },
+        # History reporting settings
+        "history_reporting": {
+            "enabled": False,
+            "min_play_seconds": 30,
+        },
     }
 
     # Load existing config or create default
@@ -77,8 +82,8 @@ def load_config() -> dict[str, Any]:
                 user_config = yaml.safe_load(f) or {}
             # Merge user config with defaults (user config takes precedence)
             config = {**default_config, **user_config}
-            # Deep-merge nested dicts (auto_auth)
-            for key in ("auto_auth",):
+            # Deep-merge nested dicts (auto_auth, history_reporting)
+            for key in ("auto_auth", "history_reporting"):
                 if key in default_config and isinstance(default_config[key], dict):
                     merged = {**default_config[key], **(user_config.get(key) or {})}
                     config[key] = merged
@@ -246,6 +251,28 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(rih, int | float) or rih <= 0:
                 raise ValueError(
                     f"auto_auth.refresh_interval_hours must be a positive number, got: {rih}"
+                )
+
+    # Validate history_reporting section
+    if "history_reporting" in config:
+        hr = config["history_reporting"]
+        if not isinstance(hr, dict):
+            raise ValueError(f"history_reporting must be a mapping, got: {type(hr)}")
+        if "enabled" in hr and not isinstance(hr["enabled"], bool):
+            raise ValueError(
+                f"history_reporting.enabled must be a boolean, got: {type(hr['enabled'])}"
+            )
+        if "min_play_seconds" in hr:
+            mps = hr["min_play_seconds"]
+            if not isinstance(mps, int) or mps < 5:
+                raise ValueError(
+                    f"history_reporting.min_play_seconds must be an integer >= 5, got: {mps}"
+                )
+            if mps < 10:
+                logger.warning(
+                    "history_reporting.min_play_seconds=%d is very low, "
+                    "this may report skipped tracks",
+                    mps,
                 )
 
     return config

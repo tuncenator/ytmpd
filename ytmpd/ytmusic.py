@@ -735,6 +735,76 @@ class YTMusicClient:
             logger.error(f"Failed to set track rating: {_truncate_error(e)}")
             raise YTMusicAPIError(f"Failed to set track rating: {_truncate_error(e)}") from e
 
+    def get_song(self, video_id: str) -> dict[str, Any]:
+        """Fetch full song metadata from YouTube Music.
+
+        Returns the raw response from ytmusicapi.get_song(), which contains
+        the playbackTracking URLs needed by add_history_item().
+
+        Args:
+            video_id: YouTube video ID.
+
+        Returns:
+            Raw song dict from ytmusicapi.
+
+        Raises:
+            YTMusicAuthError: If not authenticated.
+            YTMusicNotFoundError: If video_id doesn't exist.
+            YTMusicAPIError: On other API failures.
+        """
+        if not self._client:
+            raise YTMusicAuthError("Client not initialized")
+
+        logger.debug("Getting song for history reporting: %s", video_id)
+        self._rate_limit()
+
+        def _get() -> dict[str, Any]:
+            return self._client.get_song(video_id)
+
+        try:
+            result = self._retry_on_failure(_get)
+            if not result:
+                raise YTMusicNotFoundError(f"Song not found: {video_id}")
+            return result
+        except (YTMusicAuthError, YTMusicNotFoundError):
+            raise
+        except Exception as e:
+            logger.error("Failed to get song %s: %s", video_id, _truncate_error(e))
+            raise YTMusicAPIError(f"Failed to get song: {_truncate_error(e)}") from e
+
+    def report_history(self, song: dict[str, Any]) -> bool:
+        """Report a song as played to YouTube Music history.
+
+        Takes the dict returned by get_song(). Calls ytmusicapi.add_history_item(song).
+        Returns True on success, False on failure.
+
+        Does NOT raise on failure -- history reporting is best-effort.
+        Logs warnings on failure but does not propagate exceptions.
+
+        Args:
+            song: Raw song dict from get_song().
+
+        Returns:
+            True on success, False on failure.
+        """
+        if not self._client:
+            logger.warning("Cannot report history: client not initialized")
+            return False
+
+        self._rate_limit()
+
+        try:
+            response = self._retry_on_failure(self._client.add_history_item, song)
+            if response and hasattr(response, "status_code") and response.status_code == 204:
+                logger.debug("History item reported successfully")
+                return True
+            # add_history_item may return the response or just succeed without error
+            logger.debug("History item reported (response: %s)", type(response).__name__)
+            return True
+        except Exception as e:
+            logger.warning("Failed to report history: %s", _truncate_error(e))
+            return False
+
     @staticmethod
     def _parse_duration(duration_str: str) -> int:
         """Parse duration string (M:SS or H:MM:SS) into seconds.

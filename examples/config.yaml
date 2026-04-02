@@ -136,3 +136,19 @@ auto_auth:
   # The daemon will periodically re-extract cookies and rebuild browser.json
   # Default: 12
   refresh_interval_hours: 12
+
+# ===== History Reporting Settings =====
+
+# Report played tracks back to YouTube Music so your recommendations stay fresh.
+# When enabled, ytmpd detects track changes via MPD and calls YouTube Music's
+# history API for each track that plays longer than the minimum threshold.
+history_reporting:
+  # Enable history reporting (opt-in)
+  # Default: false
+  enabled: false
+
+  # Minimum seconds a track must play before it counts as a "listen"
+  # Tracks played for less than this are treated as skips and not reported.
+  # Default: 30
+  # Valid range: 5+
+  min_play_seconds: 30
