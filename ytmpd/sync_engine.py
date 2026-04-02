@@ -7,13 +7,14 @@ handling playlist fetching, stream URL resolution, and MPD playlist management.
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
 from ytmpd.exceptions import MPDConnectionError, MPDPlaylistError, YTMusicAPIError
 from ytmpd.mpd_client import MPDClient, TrackWithMetadata
 from ytmpd.stream_resolver import StreamResolver
-from ytmpd.ytmusic import Playlist, Track, YTMusicClient
+from ytmpd.ytmusic import Playlist, YTMusicClient
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +99,14 @@ class SyncEngine:
         mpd_client: MPDClient,
         stream_resolver: StreamResolver,
         playlist_prefix: str = "YT: ",
-        track_store: Optional["TrackStore"] = None,
-        proxy_config: Optional[dict] = None,
-        should_stop_callback: Optional[callable] = None,
+        track_store: Optional["TrackStore"] = None,  # noqa: F821
+        proxy_config: dict | None = None,
+        should_stop_callback: Callable | None = None,
         playlist_format: str = "m3u",
-        mpd_music_directory: Optional[str] = None,
+        mpd_music_directory: str | None = None,
         sync_liked_songs: bool = True,
         liked_songs_playlist_name: str = "Liked Songs",
+        like_indicator: dict | None = None,
     ):
         """Initialize sync engine with dependencies.
 
@@ -120,6 +122,7 @@ class SyncEngine:
             mpd_music_directory: Path to MPD's music directory (required for XSPF format).
             sync_liked_songs: Whether to sync liked songs as a playlist (default: True).
             liked_songs_playlist_name: Name for the liked songs playlist (default: "Liked Songs").
+            like_indicator: Optional like indicator config dict with 'enabled', 'tag', 'alignment'.
         """
         self.ytmusic = ytmusic_client
         self.mpd = mpd_client
@@ -132,6 +135,11 @@ class SyncEngine:
         self.mpd_music_directory = mpd_music_directory
         self.sync_liked_songs = sync_liked_songs
         self.liked_songs_playlist_name = liked_songs_playlist_name
+        self.like_indicator = like_indicator or {
+            "enabled": False,
+            "tag": "+1",
+            "alignment": "right",
+        }
         logger.info(
             f"SyncEngine initialized with prefix '{self.prefix}', format '{self.playlist_format}', "
             f"sync_liked_songs={self.sync_liked_songs}"
@@ -169,6 +177,7 @@ class SyncEngine:
             playlists_to_sync = list(playlists)
 
             # Add liked songs as a special "playlist" if enabled
+            liked_video_ids: set[str] = set()
             if self.sync_liked_songs:
                 try:
                     liked_tracks = self.ytmusic.get_liked_songs()
@@ -177,16 +186,30 @@ class SyncEngine:
                         liked_playlist = Playlist(
                             id="__LIKED_SONGS__",
                             name=self.liked_songs_playlist_name,
-                            track_count=len(liked_tracks)
+                            track_count=len(liked_tracks),
                         )
                         playlists_to_sync.append(liked_playlist)
                         logger.info(f"Found {len(liked_tracks)} liked songs to sync")
+                        # Build liked video ID set for like indicator
+                        if self.like_indicator.get("enabled", False):
+                            liked_video_ids = {t.video_id for t in liked_tracks}
                     else:
                         logger.info("No liked songs found")
                 except Exception as e:
                     error_msg = f"Failed to fetch liked songs: {e}"
                     logger.warning(error_msg)
                     errors.append(error_msg)
+            elif self.like_indicator.get("enabled", False):
+                # Like indicator enabled but sync_liked_songs is off -- fetch just for the set
+                try:
+                    indicator_liked = self.ytmusic.get_liked_songs()
+                    if indicator_liked:
+                        liked_video_ids = {t.video_id for t in indicator_liked}
+                        logger.info(
+                            f"Fetched {len(liked_video_ids)} liked song IDs for like indicator"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to fetch liked songs for like indicator: {e}")
 
             if not playlists_to_sync:
                 logger.info("No playlists to sync")
@@ -205,13 +228,17 @@ class SyncEngine:
             for idx, playlist in enumerate(playlists_to_sync, 1):
                 # Check if we should stop (e.g., daemon shutting down)
                 if self.should_stop():
-                    logger.info(f"Sync cancelled after {playlists_synced} playlists (requested by daemon)")
+                    logger.info(
+                        f"Sync cancelled after {playlists_synced} playlists (requested by daemon)"
+                    )
                     break
 
                 logger.info(f"Syncing playlist: {playlist.name} ({idx}/{len(playlists)})")
 
                 try:
-                    result = self._sync_single_playlist_internal(playlist)
+                    result = self._sync_single_playlist_internal(
+                        playlist, liked_video_ids=liked_video_ids
+                    )
                     playlists_synced += 1
                     tracks_added += result["tracks_added"]
                     tracks_failed += result["tracks_failed"]
@@ -297,7 +324,7 @@ class SyncEngine:
         try:
             # Find the playlist by name
             playlists = self.ytmusic.get_user_playlists()
-            matching_playlist: Optional[Playlist] = None
+            matching_playlist: Playlist | None = None
 
             for playlist in playlists:
                 if playlist.name == playlist_name:
@@ -376,9 +403,7 @@ class SyncEngine:
         # Get existing MPD playlists with our prefix
         try:
             all_mpd_playlists = self.mpd.list_playlists()
-            existing_mpd_playlists = [
-                p for p in all_mpd_playlists if p.startswith(self.prefix)
-            ]
+            existing_mpd_playlists = [p for p in all_mpd_playlists if p.startswith(self.prefix)]
         except (MPDConnectionError, MPDPlaylistError) as e:
             logger.warning(f"Could not list MPD playlists: {e}")
             existing_mpd_playlists = []
@@ -394,11 +419,16 @@ class SyncEngine:
             existing_mpd_playlists=existing_mpd_playlists,
         )
 
-    def _sync_single_playlist_internal(self, playlist: Playlist) -> dict[str, int]:
+    def _sync_single_playlist_internal(
+        self,
+        playlist: Playlist,
+        liked_video_ids: set[str] | None = None,
+    ) -> dict[str, int]:
         """Internal method to sync a single playlist.
 
         Args:
             playlist: Playlist object to sync.
+            liked_video_ids: Set of video IDs that are liked, for like indicator.
 
         Returns:
             Dict with keys 'tracks_added' and 'tracks_failed'.
@@ -451,9 +481,7 @@ class SyncEngine:
                     f"Failed to resolve any tracks for playlist '{playlist.name}'"
                 )
 
-            logger.info(
-                f"Resolved {tracks_added}/{len(video_ids)} tracks for '{playlist.name}'"
-            )
+            logger.info(f"Resolved {tracks_added}/{len(video_ids)} tracks for '{playlist.name}'")
 
         # Create list of tracks with metadata in the same order as tracks
         tracks_with_metadata = []
@@ -462,7 +490,7 @@ class SyncEngine:
         for track in tracks:
             # When proxy enabled, use placeholder URL (proxy will resolve on-demand)
             if lazy_resolution:
-                # Placeholder URL - not used since proxy URLs are generated in create_or_replace_playlist
+                # Placeholder URL - proxy URLs generated in create_or_replace_playlist
                 stream_url = None
 
                 # Save track mapping to TrackStore WITHOUT stream_url for lazy resolution
@@ -514,20 +542,22 @@ class SyncEngine:
                     )
                 )
             else:
-                logger.debug(
-                    f"Skipping unresolved track: {track.title} by {track.artist}"
-                )
+                logger.debug(f"Skipping unresolved track: {track.title} by {track.artist}")
 
         # Create MPD playlist with prefix
         mpd_playlist_name = f"{self.prefix}{playlist.name}"
         logger.debug(f"Creating MPD playlist: {mpd_playlist_name}")
 
+        is_liked_playlist = playlist.id == "__LIKED_SONGS__"
         self.mpd.create_or_replace_playlist(
             mpd_playlist_name,
             tracks_with_metadata,
             proxy_config=self.proxy_config,
             playlist_format=self.playlist_format,
             mpd_music_directory=self.mpd_music_directory,
+            liked_video_ids=liked_video_ids,
+            like_indicator=self.like_indicator,
+            is_liked_playlist=is_liked_playlist,
         )
 
         logger.info(f"Successfully created MPD playlist: {mpd_playlist_name}")

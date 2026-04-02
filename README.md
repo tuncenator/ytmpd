@@ -583,6 +583,43 @@ Sync started in background
 
 Due to a YouTube Music API limitation, disliked tracks appear as neutral when queried. This means pressing "dislike" twice will dislike the track twice instead of toggling off. You can press "like" to clear a dislike state if needed.
 
+### Like Indicator
+
+ytmpd can mark liked songs with a visual tag in your playlists, so you can see at a glance which tracks are in your "Liked Songs" collection.
+
+When enabled, liked tracks in any playlist (except "Liked Songs" itself, where every track is liked by definition) get a tag appended or prepended to their title:
+
+```
+# Right alignment (default)
+Artist - Track Name [+1]
+
+# Left alignment
+[+1] Artist - Track Name
+```
+
+The tag, alignment, and whether the indicator is active are all configurable. For XSPF playlists, the indicator is applied to the `<title>` element only -- the `<creator>` (artist) stays clean.
+
+The indicator also works for radio playlists: if the seed song or any recommended track is in your liked songs, it will be tagged.
+
+**Enabling:**
+
+Add to `~/.config/ytmpd/config.yaml`:
+
+```yaml
+like_indicator:
+  enabled: true
+  tag: "+1"           # shown as [+1]; try "*", "LIKED", etc.
+  alignment: right    # "left" or "right"
+```
+
+Restart the daemon and trigger a sync (`ytmpctl sync`) to apply.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `enabled` | `false` | Enable like indicator tags in playlist titles |
+| `tag` | `+1` | String shown inside brackets (e.g., `+1` produces `[+1]`) |
+| `alignment` | `right` | Where to place the tag: `left` or `right` of the title |
+
 ## i3 Integration
 
 ### i3 Keybindings
@@ -832,7 +869,7 @@ pytest tests/integration/
 pytest tests/test_sync_engine.py
 ```
 
-Current test coverage: **72%** (154 tests)
+Current test coverage: **72%** (260 tests)
 
 ### Type checking
 

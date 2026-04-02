@@ -152,3 +152,24 @@ history_reporting:
   # Default: 30
   # Valid range: 5+
   min_play_seconds: 30
+
+# ===== Like Indicator Settings =====
+
+# Show a visual indicator in playlist track titles for liked songs.
+# The indicator is applied during sync to all playlists EXCEPT "Liked Songs"
+# (since all tracks there are liked by definition).
+# No extra API calls -- uses the already-fetched liked songs data.
+like_indicator:
+  # Enable like indicator in playlist titles
+  # Default: false
+  enabled: false
+
+  # Tag string shown inside brackets, e.g., "+1" produces "[+1]", "*" produces "[*]"
+  # Default: "+1"
+  tag: "+1"
+
+  # Where to place the indicator: "left" or "right" of the track title
+  # Left example:  "[+1] Artist - Track Name" (M3U) or "[+1] Track Name" (XSPF title)
+  # Right example: "Artist - Track Name [+1]" (M3U) or "Track Name [+1]" (XSPF title)
+  # Default: "right"
+  alignment: right
