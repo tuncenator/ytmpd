@@ -7,6 +7,7 @@ handling playlist fetching, stream URL resolution, and MPD playlist management.
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
@@ -100,7 +101,7 @@ class SyncEngine:
         playlist_prefix: str = "YT: ",
         track_store: Optional["TrackStore"] = None,  # noqa: F821
         proxy_config: dict | None = None,
-        should_stop_callback: callable | None = None,
+        should_stop_callback: Callable | None = None,
         playlist_format: str = "m3u",
         mpd_music_directory: str | None = None,
         sync_liked_songs: bool = True,

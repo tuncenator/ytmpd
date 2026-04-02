@@ -3,7 +3,7 @@
 > **Living document** -- each phase updates this with new discoveries and changes.
 > Read this before exploring the codebase. It may already have what you need.
 >
-> Last updated by: Phase 1 - Core Implementation (2026-04-02)
+> Last updated by: Phase 2 - Testing (2026-04-02)
 
 ---
 
@@ -43,6 +43,7 @@ YouTube Music API --> SyncEngine --> MPDClient --> Playlist files (M3U/XSPF) -->
 | `tests/test_config.py` | Config validation tests | Reference for testing patterns. |
 | `tests/test_mpd_client.py` | MPD client tests | Reference for mocking MPD and testing playlist generation. |
 | `tests/test_sync_engine.py` | Sync engine tests | Reference for mocking YTMusic/MPD and testing sync flow. |
+| `tests/test_like_indicator.py` | Like indicator tests | 33 tests: config validation, title formatting, M3U/XSPF generation, SyncEngine integration. |
 
 ---
 
@@ -228,3 +229,4 @@ CREATE TABLE tracks (
 
 - **Phase 0 (Setup)**: Initial codebase exploration and documentation.
 - **Phase 1 (Core Implementation)**: Added `like_indicator` config, SyncEngine liked set building, MPDClient `_apply_like_indicator()` helper, M3U/XSPF title modification, daemon wiring. Updated existing test assertions for new params. Fixed pre-existing daemon test mock.
+- **Phase 2 (Testing)**: Created `tests/test_like_indicator.py` with 33 tests. Fixed `callable | None` -> `Callable | None` type annotation bug in `sync_engine.py`.
