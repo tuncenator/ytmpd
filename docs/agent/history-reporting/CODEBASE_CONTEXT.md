@@ -159,12 +159,15 @@ class HistoryReporter:
 self._running: bool  # Master shutdown flag
 self._sync_lock: threading.Lock  # Prevents concurrent syncs
 self._auto_auth_shutdown: threading.Event  # Signals auto-auth thread to stop
+self._history_shutdown: threading.Event  # Signals history reporter thread to stop
 
 # Thread instances (all daemon=True)
 self._sync_thread: threading.Thread | None
 self._socket_thread: threading.Thread | None
 self._proxy_thread: threading.Thread | None
 self._auto_auth_thread: threading.Thread | None
+self._history_thread: threading.Thread | None
+self._history_reporter: HistoryReporter | None  # Created when history_reporting.enabled=True
 ```
 
 **Preferred shutdown pattern** (from auto-auth loop):
@@ -332,6 +335,7 @@ track_url = f"http://{proxy_config['host']}:{proxy_config['port']}/proxy/{track.
 - Sync: `sync_interval_minutes`, `enable_auto_sync`, `playlist_prefix`
 - Proxy: `proxy_enabled`, `proxy_host`, `proxy_port`
 - Auto-auth: `auto_auth.enabled`, `.browser`, `.container`, `.profile`, `.refresh_interval_hours`
+- History reporting: `history_reporting.enabled` (default False), `.min_play_seconds` (default 30, min 5)
 
 ### Build & Run
 ```bash
@@ -363,3 +367,4 @@ ruff check ytmpd/
 
 - **Phase 0 (Setup)**: Initial codebase exploration and documentation.
 - **Phase 1 (Core History Reporter)**: Added `ytmpd/history_reporter.py` (HistoryReporter class), added `get_song()` and `report_history()` to YTMusicClient, added HistoryReporter API section, updated YTMusicClient API listing.
+- **Phase 2 (Config, Daemon Integration & Testing)**: Added `history_reporting` config section to defaults, deep-merge, and validation in `config.py`. Wired HistoryReporter into `daemon.py` (init, thread spawn, shutdown). Updated `examples/config.yaml`. Added daemon thread lifecycle attributes. Created `tests/test_history_config.py` and `tests/test_history_integration.py`.

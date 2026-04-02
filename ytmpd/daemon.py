@@ -17,6 +17,7 @@ from typing import Any
 from ytmpd.config import get_config_dir, load_config
 from ytmpd.cookie_extract import FirefoxCookieExtractor
 from ytmpd.exceptions import CookieExtractionError, MPDConnectionError
+from ytmpd.history_reporter import HistoryReporter
 from ytmpd.icy_proxy import ICYProxyServer
 from ytmpd.mpd_client import MPDClient
 from ytmpd.notify import send_notification
@@ -158,6 +159,26 @@ class YTMPDaemon:
         else:
             logger.info("Auto-auth disabled")
 
+        # History reporting
+        self._history_reporter: HistoryReporter | None = None
+        self._history_thread: threading.Thread | None = None
+        self._history_shutdown = threading.Event()
+        history_config = self.config.get("history_reporting", {})
+        if history_config.get("enabled", False) and self.track_store is not None:
+            self._history_reporter = HistoryReporter(
+                mpd_socket_path=self.config["mpd_socket_path"],
+                ytmusic=self.ytmusic_client,
+                track_store=self.track_store,
+                proxy_config=self.proxy_config or {},
+                min_play_seconds=history_config.get("min_play_seconds", 30),
+            )
+            logger.info(
+                "History reporting enabled (min_play_seconds=%d)",
+                history_config.get("min_play_seconds", 30),
+            )
+        else:
+            logger.info("History reporting disabled")
+
         logger.info("Daemon components initialized")
 
     def run(self) -> None:
@@ -200,6 +221,16 @@ class YTMPDaemon:
             self._auto_auth_thread = threading.Thread(target=self._auto_auth_loop, daemon=True)
             self._auto_auth_thread.start()
 
+        # Start history reporting thread if enabled (after proxy so URLs resolve)
+        if self._history_reporter is not None:
+            self._history_thread = threading.Thread(
+                target=self._history_loop,
+                name="history-reporter",
+                daemon=True,
+            )
+            self._history_thread.start()
+            logger.info("History reporting thread started")
+
         logger.info("ytmpd daemon started successfully")
 
         # Perform initial sync immediately
@@ -233,6 +264,14 @@ class YTMPDaemon:
 
         logger.info("Stopping ytmpd daemon...")
         self._running = False
+
+        # Signal history reporter to stop
+        if self._history_thread is not None:
+            logger.info("Stopping history reporter...")
+            self._history_shutdown.set()
+            self._history_thread.join(timeout=5)
+            if self._history_thread.is_alive():
+                logger.warning("History reporter thread did not stop in time")
 
         # Signal auto-auth thread to stop
         self._auto_auth_shutdown.set()
@@ -309,6 +348,8 @@ class YTMPDaemon:
             threads_alive.append("proxy")
         if self._auto_auth_thread and self._auto_auth_thread.is_alive():
             threads_alive.append("auto_auth")
+        if self._history_thread and self._history_thread.is_alive():
+            threads_alive.append("history")
 
         if threads_alive:
             logger.warning(f"Daemon stopping with threads still alive: {', '.join(threads_alive)}")
@@ -425,6 +466,20 @@ class YTMPDaemon:
             logger.error(f"Error in auto-auth loop: {e}", exc_info=True)
 
         logger.info("Auto-auth refresh loop stopped")
+
+    def _history_loop(self) -> None:
+        """Run history reporter in background thread."""
+        try:
+            assert self._history_reporter is not None
+            logger.info(
+                "History reporting started (min_play_seconds=%d)",
+                self.config["history_reporting"]["min_play_seconds"],
+            )
+            self._history_reporter.run(self._history_shutdown)
+        except Exception as e:
+            logger.error("History reporter crashed: %s", e, exc_info=True)
+        finally:
+            logger.info("History reporting stopped")
 
     def _attempt_auto_refresh(self) -> bool:
         """Attempt to refresh authentication via cookie extraction.
