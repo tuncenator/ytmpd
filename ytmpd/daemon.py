@@ -983,6 +983,19 @@ class YTMPDaemon:
             if not track_objects:
                 return {"success": False, "error": "No valid tracks to add to playlist"}
 
+            # Build liked video ID set for like indicator
+            like_indicator = self.config.get(
+                "like_indicator", {"enabled": False, "tag": "+1", "alignment": "right"}
+            )
+            liked_video_ids: set[str] = set()
+            if like_indicator.get("enabled", False):
+                try:
+                    liked_tracks = self.ytmusic_client.get_liked_songs()
+                    if liked_tracks:
+                        liked_video_ids = {t.video_id for t in liked_tracks}
+                except Exception as e:
+                    logger.warning(f"Failed to fetch liked songs for like indicator: {e}")
+
             # Create MPD playlist
             playlist_name = "YT: Radio"
             logger.info(f"Creating playlist '{playlist_name}' with {len(track_objects)} tracks")
@@ -992,6 +1005,8 @@ class YTMPDaemon:
                 proxy_config=self.proxy_config,
                 playlist_format=self.config.get("playlist_format", "m3u"),
                 mpd_music_directory=self.config.get("mpd_music_directory"),
+                liked_video_ids=liked_video_ids,
+                like_indicator=like_indicator,
             )
 
             logger.info(f"Radio playlist created successfully: {len(track_objects)} tracks")
