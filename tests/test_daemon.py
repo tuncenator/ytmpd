@@ -2,12 +2,7 @@
 
 import json
 import signal
-import socket
-import time
-from pathlib import Path
 from unittest.mock import Mock, patch
-
-import pytest
 
 from ytmpd.daemon import YTMPDaemon
 from ytmpd.sync_engine import SyncResult
@@ -367,6 +362,7 @@ class TestSocketCommands:
 
         # Create daemon
         daemon = YTMPDaemon()
+        daemon.ytmusic_client.is_authenticated.return_value = (True, "")
         daemon.state = {
             "last_sync": "2025-10-17T12:00:00Z",
             "last_sync_result": {
@@ -637,7 +633,7 @@ class TestSignalHandling:
 class TestDaemonRadioSearchCommands:
     """Tests for new radio and search commands (Phase 2 stubs)."""
 
-    # ========== Phase 2: Stub tests (removed - replaced by Phase 3 full implementation tests) ==========
+    # Phase 2: Stub tests removed - replaced by Phase 3 full implementation tests
     # test_cmd_radio_stub_with_video_id - REMOVED (Phase 3 implements full feature)
     # test_cmd_radio_stub_without_video_id - REMOVED (Phase 3 implements full feature)
 
@@ -1020,8 +1016,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test radio command when no track is playing."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(
@@ -1062,8 +1059,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test radio command when current track is not a YouTube track."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(
@@ -1085,10 +1083,9 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Mock MPD client to return non-YouTube track
-        daemon.mpd_client.currentsong = Mock(return_value={
-            "file": "/path/to/local/file.mp3",
-            "title": "Local Track"
-        })
+        daemon.mpd_client.currentsong = Mock(
+            return_value={"file": "/path/to/local/file.mp3", "title": "Local Track"}
+        )
 
         # Call radio command
         response = daemon._cmd_radio(None)
@@ -1108,8 +1105,9 @@ class TestDaemonRadioSearchCommands:
         tmp_path,
     ):
         """Test successful radio playlist generation."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Setup mocks
         config_dir = tmp_path / "config"
@@ -1134,10 +1132,9 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Mock MPD client to return YouTube track
-        daemon.mpd_client.currentsong = Mock(return_value={
-            "file": "http://localhost:6602/proxy/2xOPkdtFeHM",
-            "title": "Test Track"
-        })
+        daemon.mpd_client.currentsong = Mock(
+            return_value={"file": "http://localhost:6602/proxy/2xOPkdtFeHM", "title": "Test Track"}
+        )
 
         # Mock YTMusic client's get_watch_playlist
         daemon.ytmusic_client._client = Mock()
@@ -1147,22 +1144,24 @@ class TestDaemonRadioSearchCommands:
                     "videoId": "abc12345678",
                     "title": "Radio Track 1",
                     "artists": [{"name": "Artist 1"}],
-                    "duration_seconds": 180
+                    "duration_seconds": 180,
                 },
                 {
                     "videoId": "def12345678",
                     "title": "Radio Track 2",
                     "artists": [{"name": "Artist 2"}],
-                    "duration_seconds": 200
+                    "duration_seconds": 200,
                 },
             ]
         }
 
         # Mock stream resolver
-        daemon.stream_resolver.resolve_batch = Mock(return_value={
-            "abc12345678": "http://stream1.url",
-            "def12345678": "http://stream2.url",
-        })
+        daemon.stream_resolver.resolve_batch = Mock(
+            return_value={
+                "abc12345678": "http://stream1.url",
+                "def12345678": "http://stream2.url",
+            }
+        )
 
         # Mock MPD client's create_or_replace_playlist
         daemon.mpd_client.create_or_replace_playlist = Mock()
@@ -1178,9 +1177,7 @@ class TestDaemonRadioSearchCommands:
 
         # Verify get_watch_playlist was called with correct params
         daemon.ytmusic_client._client.get_watch_playlist.assert_called_once_with(
-            videoId="2xOPkdtFeHM",
-            radio=True,
-            limit=25
+            videoId="2xOPkdtFeHM", radio=True, limit=25
         )
 
         # Verify resolve_batch was NOT called (since proxy is enabled, lazy resolution is used)
@@ -1204,8 +1201,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test successful search command."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(
@@ -1227,20 +1225,22 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Mock ytmusic search results
-        daemon.ytmusic_client.search = Mock(return_value=[
-            {
-                "video_id": "abc12345678",
-                "title": "Test Song 1",
-                "artist": "Test Artist 1",
-                "duration": 180
-            },
-            {
-                "video_id": "def12345678",
-                "title": "Test Song 2",
-                "artist": "Test Artist 2",
-                "duration": 240
-            },
-        ])
+        daemon.ytmusic_client.search = Mock(
+            return_value=[
+                {
+                    "video_id": "abc12345678",
+                    "title": "Test Song 1",
+                    "artist": "Test Artist 1",
+                    "duration": 180,
+                },
+                {
+                    "video_id": "def12345678",
+                    "title": "Test Song 2",
+                    "artist": "Test Artist 2",
+                    "duration": 240,
+                },
+            ]
+        )
 
         # Call search command
         response = daemon._cmd_search("miles davis")
@@ -1269,8 +1269,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test search command with no results."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(
@@ -1351,8 +1352,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test successful play command."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(
@@ -1374,17 +1376,10 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Set proxy_config explicitly
-        daemon.proxy_config = {
-            "enabled": True,
-            "host": "localhost",
-            "port": 6602
-        }
+        daemon.proxy_config = {"enabled": True, "host": "localhost", "port": 6602}
 
         # Mock track info retrieval
-        daemon._get_track_info = Mock(return_value={
-            "title": "Test Song",
-            "artist": "Test Artist"
-        })
+        daemon._get_track_info = Mock(return_value={"title": "Test Song", "artist": "Test Artist"})
 
         # Mock MPD client methods
         daemon.mpd_client._client.clear = Mock()
@@ -1457,8 +1452,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test successful queue command."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(
@@ -1480,17 +1476,12 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Set proxy_config explicitly
-        daemon.proxy_config = {
-            "enabled": True,
-            "host": "localhost",
-            "port": 6602
-        }
+        daemon.proxy_config = {"enabled": True, "host": "localhost", "port": 6602}
 
         # Mock track info retrieval
-        daemon._get_track_info = Mock(return_value={
-            "title": "Queued Song",
-            "artist": "Queued Artist"
-        })
+        daemon._get_track_info = Mock(
+            return_value={"title": "Queued Song", "artist": "Queued Artist"}
+        )
 
         # Mock MPD client add method
         daemon.mpd_client._client.add = Mock()
@@ -1521,8 +1512,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test track info retrieval helper."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(
@@ -1544,10 +1536,9 @@ class TestDaemonRadioSearchCommands:
         daemon = YTMPDaemon()
 
         # Mock successful search
-        daemon.ytmusic_client.search = Mock(return_value=[{
-            "title": "Found Song",
-            "artist": "Found Artist"
-        }])
+        daemon.ytmusic_client.search = Mock(
+            return_value=[{"title": "Found Song", "artist": "Found Artist"}]
+        )
 
         # Call _get_track_info
         info = daemon._get_track_info("abc12345678")
@@ -1566,8 +1557,9 @@ class TestDaemonRadioSearchCommands:
         monkeypatch,
     ):
         """Test track info retrieval fallback when search fails."""
-        from ytmpd.daemon import YTMPDaemon
         from unittest.mock import Mock
+
+        from ytmpd.daemon import YTMPDaemon
 
         # Mock configuration
         monkeypatch.setattr(

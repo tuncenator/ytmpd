@@ -72,6 +72,12 @@ def load_config() -> dict[str, Any]:
             "enabled": False,
             "min_play_seconds": 30,
         },
+        # Like indicator settings
+        "like_indicator": {
+            "enabled": False,
+            "tag": "+1",
+            "alignment": "right",
+        },
     }
 
     # Load existing config or create default
@@ -83,7 +89,7 @@ def load_config() -> dict[str, Any]:
             # Merge user config with defaults (user config takes precedence)
             config = {**default_config, **user_config}
             # Deep-merge nested dicts (auto_auth, history_reporting)
-            for key in ("auto_auth", "history_reporting"):
+            for key in ("auto_auth", "history_reporting", "like_indicator"):
                 if key in default_config and isinstance(default_config[key], dict):
                     merged = {**default_config[key], **(user_config.get(key) or {})}
                     config[key] = merged
@@ -273,6 +279,26 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
                     "history_reporting.min_play_seconds=%d is very low, "
                     "this may report skipped tracks",
                     mps,
+                )
+
+    # Validate like_indicator section
+    if "like_indicator" in config:
+        li = config["like_indicator"]
+        if not isinstance(li, dict):
+            raise ValueError(f"like_indicator must be a mapping, got: {type(li)}")
+        if "enabled" in li and not isinstance(li["enabled"], bool):
+            raise ValueError(
+                f"like_indicator.enabled must be a boolean, got: {type(li['enabled'])}"
+            )
+        if "tag" in li:
+            if not isinstance(li["tag"], str) or not li["tag"]:
+                raise ValueError(
+                    f"like_indicator.tag must be a non-empty string, got: {li['tag']!r}"
+                )
+        if "alignment" in li:
+            if li["alignment"] not in ("left", "right"):
+                raise ValueError(
+                    f"like_indicator.alignment must be 'left' or 'right', got: {li['alignment']!r}"
                 )
 
     return config

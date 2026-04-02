@@ -122,6 +122,9 @@ class YTMPDaemon:
                 liked_songs_playlist_name=self.config.get(
                     "liked_songs_playlist_name", "Liked Songs"
                 ),
+                like_indicator=self.config.get(
+                    "like_indicator", {"enabled": False, "tag": "+1", "alignment": "right"}
+                ),
             )
         except Exception as e:
             logger.error(f"Failed to initialize components: {e}")

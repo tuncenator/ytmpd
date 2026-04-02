@@ -2,17 +2,16 @@
 Tests for the sync engine module.
 """
 
-import pytest
-from unittest.mock import Mock, patch, call
+from unittest.mock import Mock
 
-from ytmpd.sync_engine import SyncEngine, SyncResult, SyncPreview
-from ytmpd.ytmusic import Playlist, Track
-from ytmpd.mpd_client import TrackWithMetadata
 from ytmpd.exceptions import (
-    YTMusicAPIError,
     MPDConnectionError,
     MPDPlaylistError,
+    YTMusicAPIError,
 )
+from ytmpd.mpd_client import TrackWithMetadata
+from ytmpd.sync_engine import SyncEngine, SyncPreview, SyncResult
+from ytmpd.ytmusic import Playlist, Track
 
 
 class TestSyncEngineInit:
@@ -37,7 +36,9 @@ class TestSyncEngineInit:
         mpd = Mock()
         resolver = Mock()
 
-        engine = SyncEngine(ytmusic, mpd, resolver, playlist_prefix="YouTube - ", sync_liked_songs=False)
+        engine = SyncEngine(
+            ytmusic, mpd, resolver, playlist_prefix="YouTube - ", sync_liked_songs=False
+        )
 
         assert engine.prefix == "YouTube - "
 
@@ -106,23 +107,54 @@ class TestSyncAllPlaylists:
         mpd.create_or_replace_playlist.assert_any_call(
             "YT: Favorites",
             [
-                TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"),
-                TrackWithMetadata(url="http://example.com/2.m4a", title="Song 2", artist="Artist 2", video_id="vid2"),
-                TrackWithMetadata(url="http://example.com/3.m4a", title="Song 3", artist="Artist 3", video_id="vid3"),
+                TrackWithMetadata(
+                    url="http://example.com/1.m4a",
+                    title="Song 1",
+                    artist="Artist 1",
+                    video_id="vid1",
+                ),
+                TrackWithMetadata(
+                    url="http://example.com/2.m4a",
+                    title="Song 2",
+                    artist="Artist 2",
+                    video_id="vid2",
+                ),
+                TrackWithMetadata(
+                    url="http://example.com/3.m4a",
+                    title="Song 3",
+                    artist="Artist 3",
+                    video_id="vid3",
+                ),
             ],
             proxy_config=None,
-            playlist_format='m3u',
+            playlist_format="m3u",
             mpd_music_directory=None,
+            liked_video_ids=set(),
+            like_indicator={"enabled": False, "tag": "+1", "alignment": "right"},
+            is_liked_playlist=False,
         )
         mpd.create_or_replace_playlist.assert_any_call(
             "YT: Workout",
             [
-                TrackWithMetadata(url="http://example.com/4.m4a", title="Song 4", artist="Artist 4", video_id="vid4"),
-                TrackWithMetadata(url="http://example.com/5.m4a", title="Song 5", artist="Artist 5", video_id="vid5"),
+                TrackWithMetadata(
+                    url="http://example.com/4.m4a",
+                    title="Song 4",
+                    artist="Artist 4",
+                    video_id="vid4",
+                ),
+                TrackWithMetadata(
+                    url="http://example.com/5.m4a",
+                    title="Song 5",
+                    artist="Artist 5",
+                    video_id="vid5",
+                ),
             ],
             proxy_config=None,
-            playlist_format='m3u',
+            playlist_format="m3u",
             mpd_music_directory=None,
+            liked_video_ids=set(),
+            like_indicator={"enabled": False, "tag": "+1", "alignment": "right"},
+            is_liked_playlist=False,
         )
 
     def test_sync_all_playlists_empty(self):
@@ -179,12 +211,25 @@ class TestSyncAllPlaylists:
         mpd.create_or_replace_playlist.assert_called_once_with(
             "YT: Favorites",
             [
-                TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"),
-                TrackWithMetadata(url="http://example.com/3.m4a", title="Song 3", artist="Artist 3", video_id="vid3"),
+                TrackWithMetadata(
+                    url="http://example.com/1.m4a",
+                    title="Song 1",
+                    artist="Artist 1",
+                    video_id="vid1",
+                ),
+                TrackWithMetadata(
+                    url="http://example.com/3.m4a",
+                    title="Song 3",
+                    artist="Artist 3",
+                    video_id="vid3",
+                ),
             ],
             proxy_config=None,
-            playlist_format='m3u',
+            playlist_format="m3u",
             mpd_music_directory=None,
+            liked_video_ids=set(),
+            like_indicator={"enabled": False, "tag": "+1", "alignment": "right"},
+            is_liked_playlist=False,
         )
 
     def test_sync_all_playlists_all_tracks_fail(self):
@@ -256,12 +301,25 @@ class TestSyncAllPlaylists:
         mpd.create_or_replace_playlist.assert_called_once_with(
             "YT: Workout",
             [
-                TrackWithMetadata(url="http://example.com/3.m4a", title="Song 3", artist="Artist 3", video_id="vid3"),
-                TrackWithMetadata(url="http://example.com/4.m4a", title="Song 4", artist="Artist 4", video_id="vid4"),
+                TrackWithMetadata(
+                    url="http://example.com/3.m4a",
+                    title="Song 3",
+                    artist="Artist 3",
+                    video_id="vid3",
+                ),
+                TrackWithMetadata(
+                    url="http://example.com/4.m4a",
+                    title="Song 4",
+                    artist="Artist 4",
+                    video_id="vid4",
+                ),
             ],
             proxy_config=None,
-            playlist_format='m3u',
+            playlist_format="m3u",
             mpd_music_directory=None,
+            liked_video_ids=set(),
+            like_indicator={"enabled": False, "tag": "+1", "alignment": "right"},
+            is_liked_playlist=False,
         )
 
     def test_sync_all_playlists_ytmusic_api_error(self):
@@ -327,16 +385,28 @@ class TestSyncAllPlaylists:
             "vid1": "http://example.com/1.m4a",
         }
 
-        engine = SyncEngine(ytmusic, mpd, resolver, playlist_prefix="YouTube - ", sync_liked_songs=False)
+        engine = SyncEngine(
+            ytmusic, mpd, resolver, playlist_prefix="YouTube - ", sync_liked_songs=False
+        )
         result = engine.sync_all_playlists()
 
         assert result.success is True
         mpd.create_or_replace_playlist.assert_called_once_with(
             "YouTube - Favorites",
-            [TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1")],
+            [
+                TrackWithMetadata(
+                    url="http://example.com/1.m4a",
+                    title="Song 1",
+                    artist="Artist 1",
+                    video_id="vid1",
+                )
+            ],
             proxy_config=None,
-            playlist_format='m3u',
+            playlist_format="m3u",
             mpd_music_directory=None,
+            liked_video_ids=set(),
+            like_indicator={"enabled": False, "tag": "+1", "alignment": "right"},
+            is_liked_playlist=False,
         )
 
 
@@ -376,12 +446,25 @@ class TestSyncSinglePlaylist:
         mpd.create_or_replace_playlist.assert_called_once_with(
             "YT: Favorites",
             [
-                TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"),
-                TrackWithMetadata(url="http://example.com/2.m4a", title="Song 2", artist="Artist 2", video_id="vid2"),
+                TrackWithMetadata(
+                    url="http://example.com/1.m4a",
+                    title="Song 1",
+                    artist="Artist 1",
+                    video_id="vid1",
+                ),
+                TrackWithMetadata(
+                    url="http://example.com/2.m4a",
+                    title="Song 2",
+                    artist="Artist 2",
+                    video_id="vid2",
+                ),
             ],
             proxy_config=None,
-            playlist_format='m3u',
+            playlist_format="m3u",
             mpd_music_directory=None,
+            liked_video_ids=None,
+            like_indicator={"enabled": False, "tag": "+1", "alignment": "right"},
+            is_liked_playlist=False,
         )
 
     def test_sync_single_playlist_not_found(self):
@@ -525,7 +608,9 @@ class TestGetSyncPreview:
 
         resolver = Mock()
 
-        engine = SyncEngine(ytmusic, mpd, resolver, playlist_prefix="YouTube - ", sync_liked_songs=False)
+        engine = SyncEngine(
+            ytmusic, mpd, resolver, playlist_prefix="YouTube - ", sync_liked_songs=False
+        )
         preview = engine.get_sync_preview()
 
         # Only playlists with "YouTube - " prefix should be included
@@ -595,7 +680,7 @@ class TestSyncEngineIntegration:
         }
 
         engine = SyncEngine(ytmusic, mpd, resolver, sync_liked_songs=False)
-        result = engine.sync_all_playlists()
+        engine.sync_all_playlists()
 
         # Verify order is preserved
         mpd.create_or_replace_playlist.assert_called_once()
@@ -603,9 +688,15 @@ class TestSyncEngineIntegration:
         tracks = call_args[0][1]  # Second positional argument
 
         assert tracks == [
-            TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"),
-            TrackWithMetadata(url="http://example.com/2.m4a", title="Song 2", artist="Artist 2", video_id="vid2"),
-            TrackWithMetadata(url="http://example.com/3.m4a", title="Song 3", artist="Artist 3", video_id="vid3"),
+            TrackWithMetadata(
+                url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"
+            ),
+            TrackWithMetadata(
+                url="http://example.com/2.m4a", title="Song 2", artist="Artist 2", video_id="vid2"
+            ),
+            TrackWithMetadata(
+                url="http://example.com/3.m4a", title="Song 3", artist="Artist 3", video_id="vid3"
+            ),
         ]
 
     def test_sync_skips_unresolved_but_keeps_order(self):
@@ -637,8 +728,12 @@ class TestSyncEngineIntegration:
         tracks = call_args[0][1]
 
         assert tracks == [
-            TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"),
-            TrackWithMetadata(url="http://example.com/4.m4a", title="Song 4", artist="Artist 4", video_id="vid4"),
+            TrackWithMetadata(
+                url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"
+            ),
+            TrackWithMetadata(
+                url="http://example.com/4.m4a", title="Song 4", artist="Artist 4", video_id="vid4"
+            ),
         ]
         assert result.tracks_added == 2
         assert result.tracks_failed == 2
@@ -647,7 +742,9 @@ class TestSyncEngineIntegration:
         """Test that playlists with no tracks are skipped gracefully."""
         ytmusic = Mock()
         ytmusic.get_user_playlists.return_value = [
-            Playlist(id="PL1", name="Favorites", track_count=0),  # This should already be filtered by get_user_playlists
+            Playlist(
+                id="PL1", name="Favorites", track_count=0
+            ),  # This should already be filtered by get_user_playlists
             Playlist(id="PL2", name="Workout", track_count=2),
         ]
         # First call returns empty list (edge case if filtering failed)
@@ -679,10 +776,23 @@ class TestSyncEngineIntegration:
         mpd.create_or_replace_playlist.assert_called_once_with(
             "YT: Workout",
             [
-                TrackWithMetadata(url="http://example.com/1.m4a", title="Song 1", artist="Artist 1", video_id="vid1"),
-                TrackWithMetadata(url="http://example.com/2.m4a", title="Song 2", artist="Artist 2", video_id="vid2"),
+                TrackWithMetadata(
+                    url="http://example.com/1.m4a",
+                    title="Song 1",
+                    artist="Artist 1",
+                    video_id="vid1",
+                ),
+                TrackWithMetadata(
+                    url="http://example.com/2.m4a",
+                    title="Song 2",
+                    artist="Artist 2",
+                    video_id="vid2",
+                ),
             ],
             proxy_config=None,
-            playlist_format='m3u',
+            playlist_format="m3u",
             mpd_music_directory=None,
+            liked_video_ids=set(),
+            like_indicator={"enabled": False, "tag": "+1", "alignment": "right"},
+            is_liked_playlist=False,
         )

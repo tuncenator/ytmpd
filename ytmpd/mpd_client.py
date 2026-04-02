@@ -8,10 +8,10 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from mpd import MPDClient as MPDClientBase
 from mpd import CommandError, ConnectionError
+from mpd import MPDClient as MPDClientBase
 
 from ytmpd.exceptions import MPDConnectionError, MPDPlaylistError
 from ytmpd.xspf_generator import XSPFTrack, generate_xspf
@@ -22,11 +22,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TrackWithMetadata:
     """Track with URL and metadata for M3U/XSPF playlist generation."""
+
     url: str
     title: str
     artist: str
     video_id: str
-    duration_seconds: Optional[float] = None  # Duration in seconds (for XSPF conversion)
+    duration_seconds: float | None = None  # Duration in seconds (for XSPF conversion)
 
 
 class MPDClient:
@@ -40,7 +41,7 @@ class MPDClient:
         playlist_directory: Path to MPD's playlist directory (required for TCP).
     """
 
-    def __init__(self, socket_path: str, playlist_directory: Optional[str] = None):
+    def __init__(self, socket_path: str, playlist_directory: str | None = None):
         """Initialize client with Unix socket path or host:port.
 
         Args:
@@ -49,8 +50,10 @@ class MPDClient:
             playlist_directory: Path to MPD's playlist directory. If not specified,
                               defaults to ~/.config/mpd/playlists.
         """
-        self.socket_path = str(Path(socket_path).expanduser()) if not ":" in socket_path else socket_path
-        self._client: Optional[MPDClientBase] = None
+        self.socket_path = (
+            str(Path(socket_path).expanduser()) if ":" not in socket_path else socket_path
+        )
+        self._client: MPDClientBase | None = None
         self._connected = False
 
         # Set playlist directory
@@ -98,13 +101,9 @@ class MPDClient:
             self._connected = True
             logger.info("Successfully connected to MPD")
         except ConnectionError as e:
-            raise MPDConnectionError(
-                f"Failed to connect to MPD: {e}"
-            ) from e
+            raise MPDConnectionError(f"Failed to connect to MPD: {e}") from e
         except Exception as e:
-            raise MPDConnectionError(
-                f"Unexpected error connecting to MPD: {e}"
-            ) from e
+            raise MPDConnectionError(f"Unexpected error connecting to MPD: {e}") from e
 
     def disconnect(self) -> None:
         """Cleanly disconnect from MPD."""
@@ -148,7 +147,9 @@ class MPDClient:
         try:
             # Ensure playlist directory exists
             if not self.playlist_directory.exists():
-                logger.warning(f"Playlist directory {self.playlist_directory} does not exist, creating it")
+                logger.warning(
+                    f"Playlist directory {self.playlist_directory} does not exist, creating it"
+                )
                 self.playlist_directory.mkdir(parents=True, exist_ok=True)
 
             logger.debug(f"MPD playlist directory: {self.playlist_directory}")
@@ -195,13 +196,44 @@ class MPDClient:
         except Exception:
             return False
 
+    def _apply_like_indicator(
+        self,
+        title: str,
+        video_id: str,
+        liked_video_ids: set[str] | None,
+        like_indicator: dict | None,
+        is_liked_playlist: bool,
+    ) -> str:
+        """Apply like indicator to track title if the track is liked.
+
+        Returns the title with indicator prepended/appended, or unchanged title.
+        """
+        if not like_indicator or not like_indicator.get("enabled", False):
+            return title
+        if is_liked_playlist:
+            return title
+        if not liked_video_ids or video_id not in liked_video_ids:
+            return title
+
+        tag = like_indicator.get("tag", "+1")
+        indicator = f"[{tag}]"
+        alignment = like_indicator.get("alignment", "right")
+
+        if alignment == "left":
+            return f"{indicator} {title}"
+        else:
+            return f"{title} {indicator}"
+
     def create_or_replace_playlist(
         self,
         name: str,
         tracks: list[TrackWithMetadata],
         proxy_config: dict[str, Any] | None = None,
         playlist_format: str = "m3u",
-        mpd_music_directory: Optional[str] = None,
+        mpd_music_directory: str | None = None,
+        liked_video_ids: set[str] | None = None,
+        like_indicator: dict | None = None,
+        is_liked_playlist: bool = False,
     ) -> None:
         """Create a new playlist or replace existing one with given tracks.
 
@@ -219,6 +251,9 @@ class MPDClient:
                          If provided and enabled=True, generates proxy URLs instead of direct URLs.
             playlist_format: Playlist format - "m3u" or "xspf" (default: "m3u").
             mpd_music_directory: Path to MPD's music directory (required for XSPF format).
+            liked_video_ids: Optional set of liked video IDs for like indicator.
+            like_indicator: Optional like indicator config dict.
+            is_liked_playlist: Whether this is the liked songs playlist (skip indicator).
 
         Raises:
             MPDConnectionError: If not connected to MPD.
@@ -234,22 +269,42 @@ class MPDClient:
         playlist_format = playlist_format.lower()
 
         if playlist_format == "xspf":
-            self._create_xspf_playlist(name, tracks, proxy_config, mpd_music_directory)
+            self._create_xspf_playlist(
+                name,
+                tracks,
+                proxy_config,
+                mpd_music_directory,
+                liked_video_ids,
+                like_indicator,
+                is_liked_playlist,
+            )
         elif playlist_format == "m3u":
-            self._create_m3u_playlist(name, tracks, proxy_config)
+            self._create_m3u_playlist(
+                name,
+                tracks,
+                proxy_config,
+                liked_video_ids,
+                like_indicator,
+                is_liked_playlist,
+            )
         else:
-            raise ValueError(f"Unsupported playlist format: {playlist_format}. Use 'm3u' or 'xspf'.")
+            raise ValueError(
+                f"Unsupported playlist format: {playlist_format}. Use 'm3u' or 'xspf'."
+            )
 
     def _create_m3u_playlist(
         self,
         name: str,
         tracks: list[TrackWithMetadata],
         proxy_config: dict[str, Any] | None = None,
+        liked_video_ids: set[str] | None = None,
+        like_indicator: dict | None = None,
+        is_liked_playlist: bool = False,
     ) -> None:
         """Create M3U playlist (original implementation)."""
         try:
             # Validate playlist name to prevent path traversal attacks
-            if '/' in name or '\\' in name or '..' in name:
+            if "/" in name or "\\" in name or ".." in name:
                 raise ValueError(f"Invalid playlist name (contains path separators): {name}")
 
             # Get MPD's playlist directory
@@ -264,6 +319,13 @@ class MPDClient:
                 # EXTINF format: #EXTINF:duration,Artist - Title
                 # Duration -1 means unknown
                 artist_title = f"{track.artist} - {track.title}"
+                artist_title = self._apply_like_indicator(
+                    artist_title,
+                    track.video_id,
+                    liked_video_ids,
+                    like_indicator,
+                    is_liked_playlist,
+                )
                 m3u_content += f"#EXTINF:-1,{artist_title}\n"
 
                 # Use proxy URL if proxy is enabled, otherwise use direct URL
@@ -275,21 +337,24 @@ class MPDClient:
                 m3u_content += f"{track_url}\n"
 
             # Write the file
-            playlist_file.write_text(m3u_content, encoding='utf-8')
+            playlist_file.write_text(m3u_content, encoding="utf-8")
 
-            logger.info(f"Created M3U playlist '{name}' with {len(tracks)} tracks at {playlist_file}")
+            logger.info(
+                f"Created M3U playlist '{name}' with {len(tracks)} tracks at {playlist_file}"
+            )
 
         except Exception as e:
-            raise MPDPlaylistError(
-                f"Error creating M3U playlist '{name}': {e}"
-            ) from e
+            raise MPDPlaylistError(f"Error creating M3U playlist '{name}': {e}") from e
 
     def _create_xspf_playlist(
         self,
         name: str,
         tracks: list[TrackWithMetadata],
         proxy_config: dict[str, Any] | None = None,
-        mpd_music_directory: Optional[str] = None,
+        mpd_music_directory: str | None = None,
+        liked_video_ids: set[str] | None = None,
+        like_indicator: dict | None = None,
+        is_liked_playlist: bool = False,
     ) -> None:
         """Create XSPF playlist in MPD's music directory.
 
@@ -304,7 +369,7 @@ class MPDClient:
 
         try:
             # Validate playlist name to prevent path traversal attacks
-            if '/' in name or '\\' in name or '..' in name:
+            if "/" in name or "\\" in name or ".." in name:
                 raise ValueError(f"Invalid playlist name (contains path separators): {name}")
 
             # Create _youtube subdirectory in music directory
@@ -330,11 +395,20 @@ class MPDClient:
                 if track.duration_seconds is not None:
                     duration_ms = int(track.duration_seconds * 1000)
 
+                # Apply like indicator to title only (keep artist/creator clean)
+                display_title = self._apply_like_indicator(
+                    track.title,
+                    track.video_id,
+                    liked_video_ids,
+                    like_indicator,
+                    is_liked_playlist,
+                )
+
                 xspf_tracks.append(
                     XSPFTrack(
                         location=track_url,
                         creator=track.artist,
-                        title=track.title,
+                        title=display_title,
                         duration=duration_ms,
                     )
                 )
@@ -343,14 +417,14 @@ class MPDClient:
             xspf_content = generate_xspf(xspf_tracks)
 
             # Write the file
-            playlist_file.write_text(xspf_content, encoding='utf-8')
+            playlist_file.write_text(xspf_content, encoding="utf-8")
 
-            logger.info(f"Created XSPF playlist '{name}' with {len(tracks)} tracks at {playlist_file}")
+            logger.info(
+                f"Created XSPF playlist '{name}' with {len(tracks)} tracks at {playlist_file}"
+            )
 
         except Exception as e:
-            raise MPDPlaylistError(
-                f"Error creating XSPF playlist '{name}': {e}"
-            ) from e
+            raise MPDPlaylistError(f"Error creating XSPF playlist '{name}': {e}") from e
 
     def clear_playlist(self, name: str) -> None:
         """Delete a playlist by name.
@@ -376,9 +450,7 @@ class MPDClient:
             else:
                 raise MPDPlaylistError(f"Failed to delete playlist '{name}': {e}") from e
         except Exception as e:
-            raise MPDPlaylistError(
-                f"Unexpected error deleting playlist '{name}': {e}"
-            ) from e
+            raise MPDPlaylistError(f"Unexpected error deleting playlist '{name}': {e}") from e
 
     def add_to_playlist(self, name: str, url: str) -> None:
         """Add a single URL to an existing playlist.
@@ -403,13 +475,9 @@ class MPDClient:
             if "No such playlist" in str(e):
                 raise MPDPlaylistError(f"Playlist '{name}' does not exist") from e
             else:
-                raise MPDPlaylistError(
-                    f"Failed to add URL to playlist '{name}': {e}"
-                ) from e
+                raise MPDPlaylistError(f"Failed to add URL to playlist '{name}': {e}") from e
         except Exception as e:
-            raise MPDPlaylistError(
-                f"Unexpected error adding to playlist '{name}': {e}"
-            ) from e
+            raise MPDPlaylistError(f"Unexpected error adding to playlist '{name}': {e}") from e
 
     def currentsong(self) -> dict[str, str]:
         """Get the currently playing song from MPD.
