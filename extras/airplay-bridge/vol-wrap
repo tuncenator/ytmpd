@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# vol-wrap: route volume keys smartly.
+# - OwnTone playing AND >=1 AirPlay output selected  -> owntone API
+#     * single output  : simple +/- on that output
+#     * multi-room     : ratio-anchored scaling (Option C) using the baseline
+#                        captured by `speaker multi`
+# - Otherwise                                          -> pactl on default sink
+#
+# Usage: vol-wrap {up|down|mute}
+
+set -u -o pipefail
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/mpd-owntone-bridge/config.env"
+STATE="${XDG_CONFIG_HOME:-$HOME/.config}/mpd-owntone-bridge/state.json"
+MUTE_FILE="${XDG_RUNTIME_DIR:-/tmp}/vol-wrap.muted.json"
+
+[[ -f "$CONFIG" ]] || { echo "missing config: $CONFIG" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "$CONFIG"
+
+CURL=(command curl --silent --max-time 0.4)
+
+owntone_active_ids() {
+  local resp
+  resp=$("${CURL[@]}" "${OWNTONE_API}/player" 2>/dev/null) || return 1
+  [[ "$(jq -r .state <<< "$resp" 2>/dev/null)" == "play" ]] || return 1
+  "${CURL[@]}" "${OWNTONE_API}/outputs" 2>/dev/null \
+    | jq -r '.outputs[] | select(.selected==true and (.type | startswith("AirPlay"))) | .id'
+}
+
+owntone_get_volume() {
+  "${CURL[@]}" "${OWNTONE_API}/outputs/$1" | jq -r '.volume // 0'
+}
+
+owntone_set_volume() {
+  local v="$2"
+  (( v < 0 )) && v=0
+  (( v > 100 )) && v=100
+  "${CURL[@]}" -X PUT "${OWNTONE_API}/outputs/$1" \
+    -H 'Content-Type: application/json' \
+    -d "{\"volume\": $v}" >/dev/null
+}
+
+state_read() { [[ -f "$STATE" ]] && cat "$STATE" || echo '{}'; }
+
+# -------- single-speaker paths --------
+
+single_change() {
+  local id="$1" delta="$2" cur new
+  cur=$(owntone_get_volume "$id"); new=$(( cur + delta ))
+  owntone_set_volume "$id" "$new"
+}
+
+single_mute_toggle() {
+  local id="$1" cur
+  cur=$(owntone_get_volume "$id")
+  if (( cur > 0 )); then
+    jq -n --arg id "$id" --argjson v "$cur" '{($id):$v}' > "$MUTE_FILE"
+    owntone_set_volume "$id" 0
+  else
+    local saved
+    saved=$(jq -r --arg id "$id" '.[$id] // 40' "$MUTE_FILE" 2>/dev/null)
+    owntone_set_volume "$id" "$saved"
+  fi
+}
+
+# -------- multi-room (Option C: ratio-anchored) --------
+#
+# Baseline is captured by `speaker multi` at entry time. On +/-, we pick the
+# loudest-baseline speaker as the "lead", bump it by the step, then scale all
+# other speakers by the same ratio (lead_new / lead_baseline). Preserves the
+# relative mix you tuned per-speaker.
+
+multi_change() {
+  local delta="$1"; shift
+  local baseline
+  baseline=$(state_read | jq '.multi_baseline // empty')
+  if [[ -z "$baseline" || "$baseline" == "null" ]]; then
+    # No baseline captured; flat +/- on each so the user still gets a response.
+    local id
+    for id in "$@"; do single_change "$id" "$delta"; done
+    return
+  fi
+
+  local lead_id lead_base lead_cur lead_new scale
+  lead_id=$(jq -r 'to_entries | max_by(.value) | .key' <<< "$baseline")
+  lead_base=$(jq -r --arg id "$lead_id" '.[$id]' <<< "$baseline")
+  lead_cur=$(owntone_get_volume "$lead_id")
+  lead_new=$(( lead_cur + delta ))
+  (( lead_new < 0 )) && lead_new=0
+  (( lead_new > 100 )) && lead_new=100
+  scale=$(awk -v a="$lead_new" -v b="$lead_base" 'BEGIN{ if (b==0) print 1; else print a/b }')
+
+  local id base new
+  for id in "$@"; do
+    base=$(jq -r --arg id "$id" '.[$id] // empty' <<< "$baseline")
+    [[ -z "$base" ]] && base=40
+    new=$(awk -v b="$base" -v s="$scale" 'BEGIN{ printf "%d", b*s + 0.5 }')
+    owntone_set_volume "$id" "$new"
+  done
+}
+
+multi_mute_toggle() {
+  local -a ids=("$@")
+  local any_audible=0 id cur snap='{}'
+  for id in "${ids[@]}"; do
+    cur=$(owntone_get_volume "$id")
+    snap=$(jq --arg id "$id" --argjson v "$cur" '.[$id]=$v' <<< "$snap")
+    (( cur > 0 )) && any_audible=1
+  done
+  if (( any_audible == 1 )); then
+    echo "$snap" > "$MUTE_FILE"
+    for id in "${ids[@]}"; do owntone_set_volume "$id" 0; done
+  else
+    local saved='{}' v
+    [[ -f "$MUTE_FILE" ]] && saved=$(cat "$MUTE_FILE")
+    for id in "${ids[@]}"; do
+      v=$(jq -r --arg id "$id" '.[$id] // 40' <<< "$saved")
+      owntone_set_volume "$id" "$v"
+    done
+  fi
+}
+
+# -------- dispatch --------
+
+action="${1:-}"
+case "$action" in up|down|mute) ;; *) echo "usage: vol-wrap {up|down|mute}" >&2; exit 2 ;; esac
+
+mapfile -t ACTIVE < <(owntone_active_ids || true)
+
+if (( ${#ACTIVE[@]} == 0 )); then
+  case "$action" in
+    up)   pactl set-sink-volume @DEFAULT_SINK@ "+${VOL_STEP_PCT}%" ;;
+    down) pactl set-sink-volume @DEFAULT_SINK@ "-${VOL_STEP_PCT}%" ;;
+    mute) pactl set-sink-mute   @DEFAULT_SINK@ toggle ;;
+  esac
+  exit 0
+fi
+
+if (( ${#ACTIVE[@]} == 1 )); then
+  case "$action" in
+    up)   single_change "${ACTIVE[0]}" "+${VOL_STEP_PCT}" ;;
+    down) single_change "${ACTIVE[0]}" "-${VOL_STEP_PCT}" ;;
+    mute) single_mute_toggle "${ACTIVE[0]}" ;;
+  esac
+  exit 0
+fi
+
+case "$action" in
+  up)   multi_change "+${VOL_STEP_PCT}" "${ACTIVE[@]}" ;;
+  down) multi_change "-${VOL_STEP_PCT}" "${ACTIVE[@]}" ;;
+  mute) multi_mute_toggle            "${ACTIVE[@]}" ;;
+esac

@@ -1,0 +1,15 @@
+[Unit]
+Description=MPD-to-OwnTone metadata bridge (Shairport-Sync DMAP pipe)
+After=mpd.service network-online.target
+Wants=mpd.service
+
+[Service]
+Type=simple
+ExecStart=@SCRIPT_DIR@/mpd_owntone_metadata.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

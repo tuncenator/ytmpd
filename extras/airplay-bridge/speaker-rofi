@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# speaker-rofi: rofi-driven speaker picker.
+# Queries owntone for reachable AirPlay receivers, offers laptop + each
+# reachable speaker + multi-room options, dispatches to `speaker`.
+
+set -u -o pipefail
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/mpd-owntone-bridge/config.env"
+[[ -f "$CONFIG" ]] || { notify-send "speaker-rofi" "missing $CONFIG" 2>/dev/null || true; exit 1; }
+# shellcheck source=/dev/null
+. "$CONFIG"
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SPEAKER="$SELF_DIR/speaker"
+
+CURL=(command curl --silent --max-time 1)
+outputs_json=$("${CURL[@]}" "${OWNTONE_API}/outputs" 2>/dev/null || echo '{"outputs":[]}')
+
+# Count currently-selected AirPlay outputs, so we can mark the active mode.
+selected_airplay_count=$(jq '[.outputs[] | select(.selected==true and (.type|startswith("AirPlay")))] | length' <<< "$outputs_json")
+
+# Parallel arrays: labels shown in rofi, actions passed to `speaker`.
+labels=()
+actions=()
+
+add() {
+  labels+=("$1")
+  actions+=("$2")
+}
+
+mark_current="[*]"
+mark_idle="[ ]"
+
+# Laptop — current if no AirPlay is selected.
+if (( selected_airplay_count == 0 )); then
+  add "$mark_current Laptop speakers" "laptop"
+else
+  add "$mark_idle Laptop speakers" "laptop"
+fi
+
+# Per-speaker entries.
+while IFS=$'\t' read -r id type sel vol name; do
+  [[ -z "$id" ]] && continue
+  [[ "$type" == AirPlay* ]] || continue
+  if [[ "$sel" == "true" && "$selected_airplay_count" -eq 1 ]]; then
+    m="$mark_current"
+  else
+    m="$mark_idle"
+  fi
+  case "$id" in
+    "$SPEAKER_DENON")   action="denon" ;;
+    "$SPEAKER_KITCHEN") action="kitchen" ;;
+    *)                  action="multi $id" ;;
+  esac
+  add "$m $name  ($type, vol=$vol)" "$action"
+done < <(jq -r '.outputs[] | [.id,.type,.selected,.volume,.name] | @tsv' <<< "$outputs_json")
+
+# Multi-room entry — only if both configured IDs are discoverable.
+if [[ -n "${SPEAKER_DENON:-}" && -n "${SPEAKER_KITCHEN:-}" ]]; then
+  if jq -e --arg a "$SPEAKER_DENON" --arg b "$SPEAKER_KITCHEN" \
+        '([.outputs[] | .id] | any(. == $a)) and ([.outputs[] | .id] | any(. == $b))' \
+        <<< "$outputs_json" >/dev/null; then
+    if (( selected_airplay_count >= 2 )); then
+      add "$mark_current Multi-room: Denon + Kitchen" "multi"
+    else
+      add "$mark_idle Multi-room: Denon + Kitchen" "multi"
+    fi
+  fi
+fi
+
+# Present menu. Display labels only; the action is resolved via parallel array
+# after rofi returns the selected line (no in-band separator, no rendering glitches).
+selected=$(printf '%s\n' "${labels[@]}" \
+  | rofi -dmenu -i -p "speaker" -lines "${#labels[@]}" -no-custom -matching fuzzy \
+      2>/dev/null) || exit 0
+
+[[ -z "$selected" ]] && exit 0
+
+for i in "${!labels[@]}"; do
+  if [[ "${labels[$i]}" == "$selected" ]]; then
+    # shellcheck disable=SC2086
+    exec "$SPEAKER" ${actions[$i]}
+  fi
+done
+
+exit 1

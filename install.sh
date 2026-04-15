@@ -13,6 +13,25 @@
 
 set -e  # Exit on error
 
+# --- argument parsing ---
+WITH_AIRPLAY_BRIDGE=0
+CHECK_ONLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-airplay-bridge) WITH_AIRPLAY_BRIDGE=1 ;;
+        --check)               CHECK_ONLY=1 ;;
+        -h|--help)
+            cat <<EOF
+Usage: $0 [--with-airplay-bridge] [--check]
+
+  --with-airplay-bridge   Also install extras/airplay-bridge (OwnTone+MPD metadata bridge, speaker router, rofi picker).
+                          Personal stack; see extras/airplay-bridge/install.sh.
+  --check                 No changes; report readiness for ytmpd and (if present) the airplay-bridge.
+EOF
+            exit 0 ;;
+    esac
+done
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -38,10 +57,27 @@ if [[ "$OSTYPE" != "linux-gnu"* ]]; then
     error "This script is designed for Linux. For other systems, please install manually."
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BRIDGE_DIR="$SCRIPT_DIR/extras/airplay-bridge"
+
+# --- check mode: no changes, just report ---
+if [[ "$CHECK_ONLY" == "1" ]]; then
+    info "ytmpd readiness check"
+    if command -v uv &> /dev/null; then ok_marker="OK"; else ok_marker="MISSING"; fi
+    info "  uv: $ok_marker"
+    if [ -d "$SCRIPT_DIR/.venv" ]; then info "  venv: OK"; else info "  venv: MISSING"; fi
+    if [ -f "$HOME/.config/ytmpd/browser.json" ]; then info "  ytmusic auth: OK"; else info "  ytmusic auth: MISSING"; fi
+    if [ -f "$HOME/.config/systemd/user/ytmpd.service" ]; then info "  systemd user unit: OK"; else info "  systemd user unit: MISSING"; fi
+    if [ -x "$BRIDGE_DIR/install.sh" ]; then
+        echo
+        info "extras/airplay-bridge readiness:"
+        "$BRIDGE_DIR/install.sh" --check
+    fi
+    exit 0
+fi
+
 info "Starting ytmpd installation..."
 
-# Get the directory where the script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Step 1: Install uv if needed
@@ -182,6 +218,19 @@ else
     info "Skipping binary installation. You can use absolute paths:"
     info "  $SCRIPT_DIR/bin/ytmpctl"
     info "  $SCRIPT_DIR/bin/ytmpd-status"
+fi
+
+# Step 7.5: Optional airplay-bridge
+if [[ "$WITH_AIRPLAY_BRIDGE" == "1" ]]; then
+    info ""
+    info "=========================================="
+    info "airplay-bridge (extras) installation"
+    info "=========================================="
+    if [ -x "$BRIDGE_DIR/install.sh" ]; then
+        "$BRIDGE_DIR/install.sh"
+    else
+        warn "extras/airplay-bridge/install.sh not found or not executable; skipping"
+    fi
 fi
 
 # Step 8: Installation summary
