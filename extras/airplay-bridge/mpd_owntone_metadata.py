@@ -172,6 +172,105 @@ def _album_cache_store(artist: str, album: str, data: bytes | None) -> None:
             log.warning("Could not mark album-art miss %s: %s", miss_path, e)
 
 
+def _mpd_binary_fetch(cmd: str, uri: str) -> bytes | None:
+    """Run an MPD binary command ('albumart' or 'readpicture') to completion.
+
+    Opens a fresh short-lived TCP connection so we don't collide with the
+    metadata daemon's idle socket. Returns the full image bytes, or None
+    on any error / when the server has no art.
+
+    MPD wire format per chunk:
+        size: <total>
+        type: <mime>       (optional, varies per command)
+        binary: <chunk_n>
+        <chunk_n bytes>\n
+        OK\n
+    Loop with an incrementing offset until offset >= size.
+    """
+    try:
+        sock = socket.create_connection((MPD_HOST, MPD_PORT), timeout=ART_FETCH_TIMEOUT_SEC)
+    except OSError as e:
+        log.debug("MPD %s: connect failed: %s", cmd, e)
+        return None
+
+    buf = b""
+
+    def _readline() -> bytes:
+        nonlocal buf
+        while b"\n" not in buf:
+            chunk = sock.recv(4096)
+            if not chunk:
+                raise ConnectionError("MPD closed during binary fetch")
+            buf += chunk
+        line, _, buf = buf.partition(b"\n")
+        return line
+
+    def _read_exact(n: int) -> bytes:
+        nonlocal buf
+        while len(buf) < n:
+            chunk = sock.recv(max(4096, n - len(buf)))
+            if not chunk:
+                raise ConnectionError("MPD closed during binary fetch")
+            buf += chunk
+        head, buf = buf[:n], buf[n:]
+        return head
+
+    try:
+        banner = _readline()
+        if not banner.startswith(b"OK MPD"):
+            return None
+        quoted_uri = uri.replace("\\", "\\\\").replace('"', '\\"')
+        accumulated = bytearray()
+        offset = 0
+        total_size: int | None = None
+        while True:
+            sock.sendall(f'{cmd} "{quoted_uri}" {offset}\n'.encode())
+            chunk_size: int | None = None
+            while True:
+                line = _readline()
+                if line.startswith(b"ACK"):
+                    log.debug("MPD %s %r: %s", cmd, uri, line.decode("ascii", "replace"))
+                    return None
+                if line.startswith(b"binary: "):
+                    chunk_size = int(line[len(b"binary: ") :].strip())
+                    break
+                if line.startswith(b"size: "):
+                    total_size = int(line[len(b"size: ") :].strip())
+                # 'type:' and other keys are ignored
+            if chunk_size is None or chunk_size == 0:
+                return None
+            accumulated.extend(_read_exact(chunk_size))
+            _read_exact(1)  # trailing newline after the binary block
+            ok = _readline()
+            if not ok.startswith(b"OK"):
+                return None
+            offset += chunk_size
+            if total_size is not None and offset >= total_size:
+                return bytes(accumulated)
+    except (OSError, ConnectionError, ValueError) as e:
+        log.debug("MPD %s %r: %s", cmd, uri, e)
+        return None
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _resolve_mpd_readpicture(song: dict) -> bytes | None:
+    file_uri = song.get("file", "")
+    if not file_uri or "://" in file_uri:
+        return None
+    return _mpd_binary_fetch("readpicture", file_uri)
+
+
+def _resolve_mpd_albumart(song: dict) -> bytes | None:
+    file_uri = song.get("file", "")
+    if not file_uri or "://" in file_uri:
+        return None
+    return _mpd_binary_fetch("albumart", file_uri)
+
+
 def fetch_album_art(song: dict) -> bytes | None:
     """Return JPEG bytes for the song's album art, or None.
 
