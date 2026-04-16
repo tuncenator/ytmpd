@@ -19,6 +19,8 @@ its queue API (each MPD track becomes a queue item with native duration).
 from __future__ import annotations
 
 import base64
+import hashlib
+import json  # noqa: F401 - used by Task 3
 import logging
 import os
 import re
@@ -27,6 +29,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -40,6 +43,19 @@ ART_CACHE_DIR = Path.home() / ".cache" / "mpd-owntone-metadata"
 ART_FETCH_TIMEOUT_SEC = 5.0
 # ytmpd serves YouTube tracks via http://localhost:<port>/proxy/<11-char video_id>
 YT_PROXY_RE = re.compile(r"/proxy/([A-Za-z0-9_-]{11})(?:[?#/]|$)")
+
+# Album-art cache for online lookups (iTunes / MusicBrainz+CAA). Keyed on
+# sha1(artist|album) to tolerate arbitrary Unicode and filesystem-unsafe
+# characters in tag values. `.jpg` = hit, `.miss` = fresh negative marker.
+ALBUM_CACHE_DIR = ART_CACHE_DIR / "albums"
+NEG_CACHE_TTL_SEC = 30 * 24 * 3600  # 30 days
+
+# Required by MusicBrainz; polite everywhere else.
+ART_HTTP_USER_AGENT = "ytmpd-airplay-bridge/1.0 (+https://github.com/tyildirim/ytmpd)"
+
+# Opt-out: set this env var to any non-empty value to disable iTunes/MB lookups.
+# MPD-local resolvers (embedded + folder art) stay active regardless.
+ONLINE_ART_DISABLED = bool(os.environ.get("YTMPD_AIRPLAY_NO_ONLINE_ART"))
 
 # DMAP type codes (4 ASCII bytes, hex-encoded for the XML wire format)
 TYPE_CORE = "636f7265"  # 'core' - DAAP standard codes
@@ -103,6 +119,54 @@ def make_item(type_hex: str, code_hex: str, payload: bytes | None = None) -> byt
         f"<length>{len(payload)}</length>"
         f'<data encoding="base64">\n{b64}\n</data></item>\n'
     ).encode()
+
+
+def _album_cache_key(artist: str, album: str) -> str:
+    return hashlib.sha1(f"{artist}|{album}".encode()).hexdigest()
+
+
+def _album_cache_lookup(artist: str, album: str) -> bytes | str | None:
+    """Return JPEG bytes on hit, the string 'miss' if a fresh miss marker
+    exists, or None if the album has never been resolved (or the marker
+    has aged past NEG_CACHE_TTL_SEC).
+    """
+    key = _album_cache_key(artist, album)
+    hit_path = ALBUM_CACHE_DIR / f"{key}.jpg"
+    miss_path = ALBUM_CACHE_DIR / f"{key}.miss"
+    if hit_path.exists():
+        try:
+            return hit_path.read_bytes()
+        except OSError as e:
+            log.warning("Could not read cached album art %s: %s", hit_path, e)
+            return None
+    if miss_path.exists():
+        age = time.time() - miss_path.stat().st_mtime
+        if age < NEG_CACHE_TTL_SEC:
+            return "miss"
+    return None
+
+
+def _album_cache_store(artist: str, album: str, data: bytes | None) -> None:
+    """Persist a resolved art blob, or mark a negative-cache miss."""
+    try:
+        ALBUM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log.warning("Could not create album cache dir %s: %s", ALBUM_CACHE_DIR, e)
+        return
+    key = _album_cache_key(artist, album)
+    hit_path = ALBUM_CACHE_DIR / f"{key}.jpg"
+    miss_path = ALBUM_CACHE_DIR / f"{key}.miss"
+    if data:
+        try:
+            hit_path.write_bytes(data)
+            miss_path.unlink(missing_ok=True)
+        except OSError as e:
+            log.warning("Could not write cached album art %s: %s", hit_path, e)
+    else:
+        try:
+            miss_path.touch()
+        except OSError as e:
+            log.warning("Could not mark album-art miss %s: %s", miss_path, e)
 
 
 def fetch_album_art(song: dict) -> bytes | None:
