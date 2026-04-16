@@ -271,6 +271,74 @@ def _resolve_mpd_albumart(song: dict) -> bytes | None:
     return _mpd_binary_fetch("albumart", file_uri)
 
 
+def _fetch_itunes(artist: str, album: str) -> bytes | None:
+    """Search the iTunes Search API for an album and download its artwork.
+
+    iTunes returns `artworkUrl100` (100x100). Replacing the size token with
+    '600x600bb' upgrades to 600x600 JPEG on the same CDN path. ~20 req/min
+    per IP; a polite UA stays under whatever unwritten enforcement exists.
+    """
+    term = urllib.parse.quote(f"{artist} {album}")
+    search_url = f"https://itunes.apple.com/search?term={term}&entity=album&limit=1"
+    try:
+        req = urllib.request.Request(search_url, headers={"User-Agent": ART_HTTP_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=ART_FETCH_TIMEOUT_SEC) as resp:
+            payload = json.loads(resp.read())
+    except Exception as e:  # noqa: BLE001
+        log.debug("iTunes search failed (%r / %r): %s", artist, album, e)
+        return None
+    results = payload.get("results") or []
+    if not results:
+        return None
+    art_url = results[0].get("artworkUrl100")
+    if not art_url:
+        return None
+    art_url = art_url.replace("100x100bb", "600x600bb")
+    try:
+        req = urllib.request.Request(art_url, headers={"User-Agent": ART_HTTP_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=ART_FETCH_TIMEOUT_SEC) as resp:
+            return resp.read()
+    except Exception as e:  # noqa: BLE001
+        log.debug("iTunes art download failed (%s): %s", art_url, e)
+        return None
+
+
+def _fetch_musicbrainz(artist: str, album: str) -> bytes | None:
+    """Look up a release via MusicBrainz, then fetch its cover via CAA.
+
+    MB rate-limits to 1 req/sec (503 on exceed); CAA itself has no rate
+    limit. Both free, no API key. UA is required by MB.
+    """
+    safe_artist = artist.replace('"', "")
+    safe_album = album.replace('"', "")
+    lucene = f'artist:"{safe_artist}" AND release:"{safe_album}"'
+    mb_url = (
+        "https://musicbrainz.org/ws/2/release/"
+        f"?query={urllib.parse.quote(lucene)}&fmt=json&limit=1"
+    )
+    try:
+        req = urllib.request.Request(mb_url, headers={"User-Agent": ART_HTTP_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=ART_FETCH_TIMEOUT_SEC) as resp:
+            payload = json.loads(resp.read())
+    except Exception as e:  # noqa: BLE001
+        log.debug("MusicBrainz search failed (%r / %r): %s", artist, album, e)
+        return None
+    releases = payload.get("releases") or []
+    if not releases:
+        return None
+    mbid = releases[0].get("id")
+    if not mbid:
+        return None
+    caa_url = f"https://coverartarchive.org/release/{mbid}/front-500"
+    try:
+        req = urllib.request.Request(caa_url, headers={"User-Agent": ART_HTTP_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=ART_FETCH_TIMEOUT_SEC) as resp:
+            return resp.read()
+    except Exception as e:  # noqa: BLE001
+        log.debug("CAA art fetch failed (%s): %s", mbid, e)
+        return None
+
+
 def fetch_album_art(song: dict) -> bytes | None:
     """Return JPEG bytes for the song's album art, or None.
 
