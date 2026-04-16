@@ -339,6 +339,48 @@ def _fetch_musicbrainz(artist: str, album: str) -> bytes | None:
         return None
 
 
+def _resolve_online(song: dict) -> bytes | None:
+    """Cache-aware online lookup: iTunes then MusicBrainz/CAA.
+
+    Skipped if YTMPD_AIRPLAY_NO_ONLINE_ART is set, or if Artist+Album tags
+    aren't both present. Writes either the successful blob or a negative
+    marker, so a second play of the same album never re-hits the network.
+    """
+    if ONLINE_ART_DISABLED:
+        return None
+    artist = (song.get("Artist") or song.get("AlbumArtist") or "").strip()
+    album = (song.get("Album") or "").strip()
+    if not artist or not album:
+        return None
+
+    cached = _album_cache_lookup(artist, album)
+    if isinstance(cached, bytes):
+        return cached
+    if cached == "miss":
+        return None
+
+    for fetcher in (_fetch_itunes, _fetch_musicbrainz):
+        try:
+            art = fetcher(artist, album)
+        except Exception as e:  # noqa: BLE001 - belt-and-suspenders
+            log.warning("%s raised: %s", fetcher.__name__, e)
+            art = None
+        if art:
+            _album_cache_store(artist, album, art)
+            log.info(
+                "Online art hit via %s for %r / %r (%d bytes)",
+                fetcher.__name__,
+                artist,
+                album,
+                len(art),
+            )
+            return art
+
+    _album_cache_store(artist, album, None)
+    log.info("No online art found for %r / %r (cached miss)", artist, album)
+    return None
+
+
 def fetch_album_art(song: dict) -> bytes | None:
     """Return JPEG bytes for the song's album art, or None.
 
