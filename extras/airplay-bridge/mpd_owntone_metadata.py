@@ -445,13 +445,16 @@ def derive_album(song: dict) -> str:
     return song.get("Album") or "local"
 
 
-def make_track_payload(song: dict) -> bytes:
-    """Build the XML payload for a complete track-change metadata block."""
+def make_track_payload(song: dict, art: bytes | None) -> bytes:
+    """Build the XML payload for a complete track-change metadata block.
+
+    `art` is None for the immediate text-only emission, and JPEG bytes for
+    the follow-up emission from the art worker.
+    """
     artist = song.get("Artist") or song.get("AlbumArtist") or ""
     title = song.get("Title") or os.path.basename(song.get("file", "")) or ""
     album = derive_album(song)
     track_id = song.get("Id") or song.get("Pos") or "0"
-    art = fetch_album_art(song)
 
     log.info(
         "Track: %r / %r / %r (art: %s bytes)",
@@ -485,6 +488,68 @@ def safe_write(fd: int, lock: threading.Lock, payload: bytes) -> None:
             log.warning("Metadata pipe write would block, dropping update")
         except OSError as e:
             log.error("Metadata pipe write failed: %s", e)
+
+
+class ArtWorker:
+    """Latest-wins async album-art resolver.
+
+    The main loop calls `request(song)` once per track change. Only the most
+    recent request is honored — writing over a pending request discards it,
+    so rapid track-skipping can never queue up stale fetches.
+
+    On a successful resolve the worker acquires `write_lock`, re-checks that
+    the current track still matches what it fetched for, and emits a second
+    MDST/MDEN block with the PICT frame. If the user already moved on, the
+    blob is dropped.
+    """
+
+    def __init__(
+        self,
+        fd: int,
+        write_lock: threading.Lock,
+        current_key_getter,
+    ) -> None:
+        self._fd = fd
+        self._write_lock = write_lock
+        self._current_key_getter = current_key_getter
+        self._cond = threading.Condition()
+        self._pending: dict | None = None
+        self._thread = threading.Thread(target=self._run, name="art-worker", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def request(self, song: dict) -> None:
+        with self._cond:
+            self._pending = song  # latest wins; any older pending is dropped
+            self._cond.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._cond:
+                while self._pending is None:
+                    self._cond.wait()
+                song = self._pending
+                self._pending = None
+            song_key = (song.get("file"), song.get("Id"))
+            try:
+                art = fetch_album_art(song)
+            except Exception as e:  # noqa: BLE001
+                log.warning("art worker: fetch raised for %r: %s", song_key, e)
+                continue
+            if not art:
+                continue
+            with self._write_lock:
+                if self._current_key_getter() != song_key:
+                    log.debug(
+                        "art worker: track changed, dropping art for %r",
+                        song_key,
+                    )
+                    continue
+                try:
+                    os.write(self._fd, make_track_payload(song, art))
+                except (BlockingIOError, OSError) as e:
+                    log.warning("art worker: pipe write failed: %s", e)
 
 
 class MPDClient:
@@ -557,12 +622,31 @@ class MPDClient:
 
 
 def metadata_loop(fd: int, lock: threading.Lock) -> None:
-    """Subscribe to MPD `idle` and emit a track-change block on every change.
+    """Subscribe to MPD `idle` and emit track-change blocks on every change.
 
-    On reconnect (including SIGUSR1-induced socket shutdown), the current song
-    is always re-emitted — that path is how we refresh metadata into a new
-    AirPlay RTSP session after a speaker switch.
+    Two-phase per track:
+      1. Emit text-only block immediately (no PICT).
+      2. Hand the song to ArtWorker, which later emits a second block with
+         PICT if the track hasn't changed by the time art is resolved.
+
+    current_key_slot is a single-element list protected by the shared
+    write_lock; the worker reads it under the same lock to guard against
+    stale emissions.
     """
+    current_key_slot: list = [None]
+    art_worker = ArtWorker(fd, lock, lambda: current_key_slot[0])
+    art_worker.start()
+
+    def _emit_text(song: dict, key: tuple) -> None:
+        with lock:
+            current_key_slot[0] = key
+            try:
+                os.write(fd, make_track_payload(song, art=None))
+            except BlockingIOError:
+                log.warning("Metadata pipe write would block, dropping update")
+            except OSError as e:
+                log.error("Metadata pipe write failed: %s", e)
+
     while True:
         client = MPDClient(MPD_HOST, MPD_PORT)
         _reemit_active_client[0] = client
@@ -572,7 +656,8 @@ def metadata_loop(fd: int, lock: threading.Lock) -> None:
             song = client.currentsong()
             key = (song.get("file"), song.get("Id"))
             if song:
-                safe_write(fd, lock, make_track_payload(song))
+                _emit_text(song, key)
+                art_worker.request(song)
                 last_song_key = key
             while True:
                 changed = client.idle("player", "playlist")
@@ -580,7 +665,8 @@ def metadata_loop(fd: int, lock: threading.Lock) -> None:
                 song = client.currentsong()
                 key = (song.get("file"), song.get("Id"))
                 if song and key != last_song_key:
-                    safe_write(fd, lock, make_track_payload(song))
+                    _emit_text(song, key)
+                    art_worker.request(song)
                     last_song_key = key
         except (ConnectionError, OSError, RuntimeError) as e:
             log.info("metadata: reconnect (%s); re-emit on next connect", e)
