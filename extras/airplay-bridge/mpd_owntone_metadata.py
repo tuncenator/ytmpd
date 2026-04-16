@@ -381,12 +381,11 @@ def _resolve_online(song: dict) -> bytes | None:
     return None
 
 
-def fetch_album_art(song: dict) -> bytes | None:
-    """Return JPEG bytes for the song's album art, or None.
+def _resolve_yt_proxy(song: dict) -> bytes | None:
+    """Fetch YouTube thumbnail for tracks served via ytmpd's proxy URL.
 
-    Currently handles YouTube tracks served via ytmpd's proxy URL by extracting
-    the video_id and pulling YouTube's hqdefault thumbnail. Cached on disk so
-    repeated plays of the same track don't re-fetch.
+    Cached per-video-id on disk under ART_CACHE_DIR. Cache hits are a local
+    Path.read_bytes() so this resolver stays fast even for repeated plays.
     """
     file_uri = song.get("file", "")
     m = YT_PROXY_RE.search(file_uri)
@@ -405,11 +404,32 @@ def fetch_album_art(song: dict) -> bytes | None:
         with urllib.request.urlopen(url, timeout=ART_FETCH_TIMEOUT_SEC) as resp:
             data = resp.read()
         cache_path.write_bytes(data)
-        log.info("Fetched art for %s (%d bytes)", video_id, len(data))
+        log.info("Fetched YT art for %s (%d bytes)", video_id, len(data))
         return data
-    except Exception as e:  # noqa: BLE001 - log and continue
-        log.warning("Failed to fetch art for %s: %s", video_id, e)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Failed to fetch YT art for %s: %s", video_id, e)
         return None
+
+
+_RESOLVERS = (
+    _resolve_yt_proxy,
+    _resolve_mpd_readpicture,
+    _resolve_mpd_albumart,
+    _resolve_online,
+)
+
+
+def fetch_album_art(song: dict) -> bytes | None:
+    """Run the resolver chain and return the first non-None JPEG, or None."""
+    for resolver in _RESOLVERS:
+        try:
+            art = resolver(song)
+        except Exception as e:  # noqa: BLE001
+            log.warning("resolver %s raised: %s", resolver.__name__, e)
+            continue
+        if art:
+            return art
+    return None
 
 
 def derive_album(song: dict) -> str:
