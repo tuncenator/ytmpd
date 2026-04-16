@@ -140,7 +140,10 @@ def _album_cache_lookup(artist: str, album: str) -> bytes | str | None:
             log.warning("Could not read cached album art %s: %s", hit_path, e)
             return None
     if miss_path.exists():
-        age = time.time() - miss_path.stat().st_mtime
+        try:
+            age = time.time() - miss_path.stat().st_mtime
+        except OSError:
+            return None
         if age < NEG_CACHE_TTL_SEC:
             return "miss"
     return None
@@ -156,7 +159,7 @@ def _album_cache_store(artist: str, album: str, data: bytes | None) -> None:
     key = _album_cache_key(artist, album)
     hit_path = ALBUM_CACHE_DIR / f"{key}.jpg"
     miss_path = ALBUM_CACHE_DIR / f"{key}.miss"
-    if data:
+    if data is not None:
         try:
             hit_path.write_bytes(data)
             miss_path.unlink(missing_ok=True)
