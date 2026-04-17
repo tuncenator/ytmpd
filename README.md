@@ -1,652 +1,285 @@
-# ytmpd - YouTube Music to MPD Sync Daemon
+# ytmpd — YouTube Music → MPD sync daemon
 
-A smart sync daemon that bridges YouTube Music and MPD (Music Player Daemon). Automatically sync your YouTube Music playlists to MPD, enabling playback control through standard MPD clients like `mpc` and seamless integration with your existing i3 window manager setup.
-
-## Architecture Overview
+A background sync daemon that pulls your YouTube Music library into MPD so you
+can drive playback with standard MPD tooling (`mpc`, `ncmpcpp`, mobile MPD
+clients, i3 keybindings). Optional extras extend it with AirPlay multi-room
+routing via OwnTone.
 
 ```
-YouTube Music Playlists
-         ↓
-   ytmpd sync daemon (periodic + manual trigger)
-         ↓ (python-mpd2)
-   MPD server (local Unix socket)
-         ↓
-   mpc commands (existing i3 keybindings)
-         ↓
-   Audio output
+YouTube Music  →  ytmpd daemon  →  MPD  →  mpc / ncmpcpp / AirPlay (optional)
 ```
-
-**What ytmpd does:**
-- Fetches your YouTube Music playlists via ytmusicapi
-- Resolves video IDs to streamable audio URLs using yt-dlp
-- Creates/updates MPD playlists with "YT: " prefix
-- Runs periodic auto-sync (configurable interval, default 30 minutes)
-- Provides manual sync triggers via `ytmpctl sync`
-- Caches stream URLs for 5 hours (YouTube URLs expire after ~6 hours)
-
-**What you control playback with:**
-- Standard MPD clients: `mpc`, `ncmpcpp`, `cantata`, etc.
-- Your existing i3 keybindings (now using `mpc` instead of custom ytmpctl commands)
-- Any MPD-compatible mobile apps
 
 ## Features
 
-- **Automatic playlist sync**: Periodic background sync of YouTube Music playlists to MPD
-- **Manual sync trigger**: Force immediate sync with `ytmpctl sync`
-- **Playlist prefixing**: YouTube playlists appear in MPD as "YT: <playlist-name>"
-- **URL caching**: Stream URLs cached for 5 hours to reduce yt-dlp overhead
-- **ICY metadata proxy**: Built-in HTTP proxy injects track metadata into audio streams for display in MPD clients
-- **Error handling**: Failed tracks don't stop sync, errors logged clearly
-- **State persistence**: Tracks last sync time and statistics across daemon restarts
-- **MPD-native playback**: Leverage MPD's robust audio playback instead of custom implementation
-- **i3blocks integration**: Status display shows MPD playback state
-
-## Auto-Authentication
-
-ytmpd can automatically refresh YouTube Music authentication by extracting cookies directly from your Firefox browser. This eliminates the need to manually paste request headers when your session expires.
-
-### How It Works
-
-1. The daemon periodically reads cookies from your Firefox profile's SQLite database
-2. It rebuilds `browser.json` with fresh cookies and a valid SAPISIDHASH
-3. The ytmusicapi client is reinitialized with the new credentials
-4. If a sync fails due to expired auth, it attempts an immediate refresh before retrying
-
-### Prerequisites
-
-- **Firefox** (standard or Developer Edition) with an active Google/YouTube Music session
-- You must be logged in to YouTube Music in Firefox -- ytmpd reads your existing session cookies
-- Firefox Multi-Account Containers support is included if you use containerized accounts
-
-### Enabling Auto-Auth
-
-Add to `~/.config/ytmpd/config.yaml`:
-
-```yaml
-auto_auth:
-  enabled: true
-  browser: firefox-dev   # or "firefox" for standard Firefox
-```
-
-Restart the daemon to apply.
-
-### Configuration Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enabled` | `false` | Enable automatic cookie extraction |
-| `browser` | `firefox-dev` | Browser to extract from: `firefox` or `firefox-dev` |
-| `container` | `null` | Firefox container name, or null for default context |
-| `profile` | `null` | Explicit profile dir name, or null to auto-detect |
-| `refresh_interval_hours` | `12` | How often to proactively refresh cookies |
-
-### Manual Trigger
-
-You can trigger a one-time cookie extraction without the daemon running:
-
-```bash
-ytmpctl auth --auto
-```
-
-This reads your Firefox cookies, rebuilds `browser.json`, and exits. Useful for initial setup or debugging.
-
-### What Happens When Cookies Expire
-
-YouTube session cookies typically last a long time, but they can expire if you:
-- Clear browser data
-- Log out of Google in Firefox
-- Haven't opened Firefox in an extended period
-
-When cookies expire:
-1. The proactive refresh detects invalid cookies during its scheduled run
-2. A desktop notification alerts you (via `notify-send`, rate-limited to 1/hour)
-3. The i3blocks widget turns orange (refresh failures) or red (auth invalid)
-4. Fix: Log in to YouTube Music in Firefox, and the next refresh cycle will pick up the new cookies
-
-### Troubleshooting
-
-**"Firefox profiles.ini not found"**
-- Firefox is not installed, or the profile directory is non-standard
-- Check that `~/.mozilla/firefox/profiles.ini` exists
-
-**"No firefox-dev installation found"**
-- You set `browser: firefox-dev` but only have standard Firefox (or vice versa)
-- Change `browser` to match your installed Firefox variant
-
-**"cookies.sqlite not found"**
-- The Firefox profile exists but has no cookie database
-- This can happen with a brand-new profile -- browse to YouTube Music first
-
-**"Container X not found"**
-- The container name in config doesn't match any container in Firefox
-- Check your container names in Firefox settings or set `container: null`
-
-**"Cookie validation failed"**
-- Required cookies are missing or expired in Firefox
-- Log in to YouTube Music in Firefox and try again
-
-## ICY Metadata Proxy
-
-ytmpd includes a built-in streaming proxy that enables MPD clients to display track metadata (artist, title) instead of raw YouTube URLs.
-
-### How It Works
-
-The ICY proxy sits between MPD and YouTube, injecting ICY/Shoutcast metadata headers into the audio stream:
-
-```
-MPD client (mpc/ncmpcpp)
-         ↓
-MPD server (loads proxy URLs)
-         ↓
-ICY Proxy (http://localhost:8080/proxy/{video_id})
-         ↓ (adds ICY headers: artist, title)
-YouTube stream (raw audio)
-```
-
-When you load a playlist, MPD receives proxy URLs like `http://localhost:8080/proxy/dQw4w9WgXcQ` instead of direct YouTube URLs. The proxy:
-1. Fetches track metadata from its database (populated during sync)
-2. Retrieves the YouTube stream
-3. Injects ICY headers (`icy-name: Artist - Title`)
-4. Streams the audio to MPD with metadata intact
-
-### Configuration
-
-The proxy is **enabled by default**. Configure in `~/.config/ytmpd/config.yaml`:
-
-```yaml
-# ICY Proxy Settings
-proxy_enabled: true              # Enable/disable proxy
-proxy_host: localhost            # Proxy bind address
-proxy_port: 8080                 # Proxy port
-proxy_track_mapping_db: ~/.config/ytmpd/track_mapping.db  # Track metadata database
-```
-
-### Viewing Metadata in MPD Clients
-
-**ncmpcpp:**
-- Track metadata appears in the playlist view
-- Current track shows "Artist - Title" in status bar
-- Queue view displays formatted track names
-
-**mpc:**
-```bash
-$ mpc current
-Rick Astley - Never Gonna Give You Up
-
-$ mpc playlist
-YT: Favorites
-Rick Astley - Never Gonna Give You Up
-Queen - Bohemian Rhapsody
-The Beatles - Hey Jude
-```
-
-### Automatic URL Refresh
-
-YouTube stream URLs expire after ~6 hours. The proxy automatically:
-- Detects expired URLs (checks timestamp > 5 hours old)
-- Refreshes URLs using yt-dlp in the background
-- Continues playback without interruption
-- Falls back to old URL if refresh fails
-
-**Manual refresh:**
-```bash
-ytmpctl sync  # Refreshes all URLs immediately
-```
-
-### Advanced Features
-
-- **Concurrent streams**: Supports up to 10 simultaneous streams (configurable via `max_concurrent_streams`)
-- **Retry logic**: Automatically retries failed requests with exponential backoff (1s, 2s, 4s)
-- **Connection limiting**: Returns HTTP 503 when connection limit reached
-- **Error handling**: Gracefully handles network failures, expired URLs, and stream errors
-
-### Troubleshooting
-
-**Problem: ncmpcpp still shows URLs instead of metadata**
-
-Solutions:
-1. Verify proxy is enabled: Check `proxy_enabled: true` in config
-2. Restart ytmpd daemon to apply config changes
-3. Check proxy is running: `netstat -an | grep 8080`
-4. Verify tracks are in database:
-   ```bash
-   sqlite3 ~/.config/ytmpd/track_mapping.db "SELECT COUNT(*) FROM tracks;"
-   ```
-
-**Problem: Proxy port 8080 already in use**
-
-Solutions:
-1. Change port in config: Set `proxy_port: 8081` (or any free port)
-2. Find process using port: `lsof -i :8080`
-3. Restart ytmpd daemon
-
-**Problem: Tracks fail to play after several hours**
-
-Cause: YouTube URLs expire after ~6 hours. The proxy automatically refreshes them, but you can force immediate refresh.
-
-Solutions:
-1. Wait a few seconds - proxy is refreshing URL automatically
-2. Force immediate sync: `ytmpctl sync`
-3. Check logs for refresh errors: `grep "URL refresh" ~/.config/ytmpd/ytmpd.log`
-
-**Problem: High memory usage**
-
-Cause: Multiple concurrent streams or connection leaks.
-
-Solutions:
-1. Check active connections: `netstat -an | grep 8080 | grep ESTABLISHED | wc -l`
-2. Reduce connection limit in config: `max_concurrent_streams: 5`
-3. Restart daemon to reset connections
-4. Check proxy logs: `grep "\[PROXY\]" ~/.config/ytmpd/ytmpd.log`
-
-For detailed technical documentation, see [docs/ICY_PROXY.md](docs/ICY_PROXY.md).
+- **Playlist sync** — pulls your YouTube Music playlists into MPD on a timer
+  and on demand (`ytmpctl sync`). Playlists appear as `YT: <name>`.
+- **XSPF playlists** — optional format that gives MPD separate artist/title
+  fields and duration, for proper ncmpcpp display.
+- **Radio** — generate a personalised radio playlist seeded from the current
+  track (`ytmpctl radio`).
+- **Search** — interactive search across YouTube Music with play/enqueue/radio
+  actions (`ytmpctl search`).
+- **Likes / dislikes** — toggle ratings from any MPD environment; changes sync
+  back to YouTube Music (`ytmpctl like|dislike`).
+- **Like indicator** — visually tag liked tracks inside playlists (e.g.
+  `Artist - Title [+1]`).
+- **History reporting** — feed completed plays back to YouTube Music so its
+  recommendation engine stays warm.
+- **Auto-authentication** — refresh YouTube Music credentials automatically by
+  reading cookies from your Firefox profile; no manual header pasting.
+- **i3 integration** — status script with adaptive truncation for i3blocks.
+- **AirPlay bridge (optional)** — see [`extras/airplay-bridge/`](extras/airplay-bridge/)
+  for atomic speaker routing, metadata forwarding, and smart volume keys on
+  top of OwnTone.
 
 ## Requirements
 
-- **Python 3.11 or higher**
-- **[uv](https://github.com/astral-sh/uv)** for environment management
-- **MPD (Music Player Daemon)** - must be installed and running
-- **mpc** - MPD command-line client
-- **YouTube Music account** (free or premium)
+- Python 3.11+
+- [uv](https://github.com/astral-sh/uv) for environment management
+- MPD + `mpc`
+- YouTube Music account (free or premium)
 
-### MPD Setup
-
-ytmpd requires a working MPD installation:
+### MPD setup
 
 ```bash
-# Install MPD and mpc (Arch/Manjaro)
+# Arch / Manjaro
 sudo pacman -S mpd mpc
 
-# Or on Ubuntu/Debian
+# Debian / Ubuntu
 sudo apt install mpd mpc
 
-# Enable and start MPD
-systemctl --user enable mpd
-systemctl --user start mpd
-```
-
-Verify MPD is running:
-```bash
-mpc status
+systemctl --user enable --now mpd
+mpc status  # sanity check
 ```
 
 ## Installation
 
-### 1. Clone the repository
-
 ```bash
-git clone <repository-url>
+git clone <repo> ytmpd
 cd ytmpd
-```
-
-### 2. Install uv (if not already installed)
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### 3. Create virtual environment and install dependencies
-
-```bash
-# Create virtual environment
 uv venv
-
-# Activate virtual environment
 source .venv/bin/activate
-
-# Install ytmpd with development dependencies
 uv pip install -e ".[dev]"
 ```
 
-### 4. Setup YouTube Music Authentication
+## Authentication
 
-ytmpd uses browser-based authentication with YouTube Music. Extract request headers from your browser:
+ytmpd needs a YouTube Music session. Two options:
+
+### One-shot browser headers
 
 ```bash
 python -m ytmpd.ytmusic setup-browser
 ```
 
-Follow the instructions to:
-1. Open YouTube Music in your browser and log in
-2. Open browser developer tools (F12)
-3. Go to Network tab and reload the page
-4. Find a request to `music.youtube.com` (e.g., browse endpoint)
-5. Copy the request headers (Right-click → Copy → Copy as cURL, then extract headers)
-6. Paste into the ytmusicapi interactive setup
+Follow the prompts: log in to YouTube Music in your browser, open devtools →
+Network, copy request headers from any `music.youtube.com` call, paste in. This
+writes `~/.config/ytmpd/browser.json` and is good for ~2 years.
 
-This creates `~/.config/ytmpd/browser.json` with your authentication credentials.
+### Auto-auth (recommended)
 
-**Note**: Browser authentication lasts approximately 2 years before you need to refresh it.
+Let ytmpd rebuild `browser.json` periodically from your Firefox cookie
+database:
+
+```yaml
+# ~/.config/ytmpd/config.yaml
+auto_auth:
+  enabled: true
+  browser: firefox-dev   # or "firefox"
+  container: null        # or Multi-Account-Containers name
+  profile: null          # null = auto-detect
+  refresh_interval_hours: 12
+```
+
+Trigger a one-off extraction without the daemon:
+
+```bash
+ytmpctl auth --auto
+```
+
+If cookies go stale (cleared data, logged out, browser long unused) you'll get
+a desktop notification; the i3blocks widget flags it as orange/red. Log back
+into YouTube Music in Firefox and the next refresh cycle will pick it up.
 
 ## Usage
 
-### Starting the daemon
-
-Start ytmpd in the background:
+### Start the daemon
 
 ```bash
 source .venv/bin/activate
 python -m ytmpd &
 ```
 
-The daemon will:
-- Perform an initial sync immediately on startup
-- Listen on Unix socket at `~/.config/ytmpd/sync_socket`
-- Log to `~/.config/ytmpd/ytmpd.log`
-- Persist sync state to `~/.config/ytmpd/sync_state.json`
-- Auto-sync every 30 minutes (configurable)
+On startup ytmpd runs an initial sync, then auto-syncs every
+`sync_interval_minutes` (default 30). Logs land in
+`~/.config/ytmpd/ytmpd.log`.
 
-### Using ytmpctl (sync control)
+### `ytmpctl`
 
-`ytmpctl` is now focused on sync operations, not playback:
+`ytmpctl` drives the daemon for everything except playback:
 
-```bash
-# Trigger immediate sync
-ytmpctl sync
+| Command                   | What it does |
+|---------------------------|--------------|
+| `ytmpctl sync`            | Force an immediate sync |
+| `ytmpctl status`          | Sync state + stats |
+| `ytmpctl list-playlists`  | List YouTube Music playlists |
+| `ytmpctl search`          | Interactive search (play / enqueue / radio) |
+| `ytmpctl radio [--apply]` | Radio from current track; `--apply` also loads & plays |
+| `ytmpctl like`            | Toggle like on the currently playing track |
+| `ytmpctl dislike`         | Toggle dislike on the currently playing track |
+| `ytmpctl auth --auto`     | One-off Firefox cookie extraction |
 
-# Check sync status and statistics
-ytmpctl status
-
-# List YouTube Music playlists
-ytmpctl list-playlists
-
-# Show help
-ytmpctl help
-```
-
-### Using mpc (playback control)
-
-All playback control is now through standard MPD clients:
+### Playback via `mpc`
 
 ```bash
-# Load a YouTube playlist
 mpc load "YT: Favorites"
-
-# Playback controls
 mpc play
-mpc pause
-mpc stop
-mpc next
-mpc prev
-
-# Check status
-mpc status
-
-# Search and play tracks
-mpc search title "wonderwall"
-mpc play 1
-
-# View current playlist
-mpc playlist
+mpc next / mpc prev / mpc toggle / mpc stop
 ```
 
-### Example workflow
+Stream URLs expire after ~6 hours; ytmpd caches them for 5 hours and refreshes
+on the next sync cycle. If a track fails to play, run `ytmpctl sync`.
+
+## Radio & search
+
+**Radio** generates a 25-track recommendation playlist seeded from the current
+YouTube Music track:
 
 ```bash
-# 1. Start ytmpd daemon
-$ python -m ytmpd &
-[2025-10-17 10:00:00] [INFO] Starting ytmpd daemon...
-[2025-10-17 10:00:05] [INFO] Sync complete: 5 playlists, 150 tracks
-
-# 2. Check sync status
-$ ytmpctl status
-=== ytmpd Sync Status ===
-
-Last sync: 2025-10-17 10:00:05
-Daemon started: 2025-10-17 10:00:00
-
-Status: Last sync successful
-
-=== Last Sync Statistics ===
-Playlists synced: 5
-Tracks added: 150
-Tracks failed: 3
-
-# 3. List YouTube playlists
-$ ytmpctl list-playlists
-=== YouTube Music Playlists ===
-
-  • Favorites (52 tracks)
-  • Workout (28 tracks)
-  • Chill Vibes (41 tracks)
-  • Driving (35 tracks)
-  • Focus Music (67 tracks)
-
-Total: 5 playlists
-
-To load a playlist in MPD, use:
-  mpc load "YT: <playlist-name>"
-
-# 4. Load and play a YouTube playlist
-$ mpc load "YT: Favorites"
-$ mpc play
-Queen - Bohemian Rhapsody
-[playing] #1/52   0:12/5:55 (3%)
-volume:100%   repeat: off   random: off
-
-# 5. Control playback with mpc
-$ mpc next
-The Beatles - Hey Jude
-
-$ mpc pause
-[paused] #2/52   0:05/7:06 (1%)
+ytmpctl radio            # write to ~/Music/_youtube/YT: Radio.xspf
+ytmpctl radio --apply    # write + load + play
 ```
 
-### Radio and Search Features
+Configurable via `radio_playlist_limit` (10–50).
 
-ytmpd includes two additional features for discovering and playing music:
-
-#### Generate Radio Playlist
-
-Generate a personalized radio playlist based on the currently playing track:
-
-```bash
-$ ytmpctl radio
-Generating radio playlist from current track...
-✓ Radio playlist created: 25 tracks
-
-Playlist 'YT: Radio' is ready in MPD.
-To load and play:
-  mpc load "_youtube/YT: Radio.xspf"
-  mpc play
-```
-
-The radio feature:
-1. Detects the currently playing YouTube Music track
-2. Uses YouTube Music's recommendation algorithm to generate related tracks
-3. Creates an XSPF playlist file at `~/Music/_youtube/YT: Radio.xspf`
-4. Default limit: 25 tracks (configurable via `radio_playlist_limit` in config.yaml)
-
-**Auto-apply mode** (immediately load and play):
-```bash
-$ ytmpctl radio --apply
-Generating radio playlist from current track...
-✓ Radio playlist created: 25 tracks
-
-Applying radio playlist to MPD...
-✓ Radio playlist loaded and playing!
-```
-
-**Error handling:**
-- No track playing: "No track currently playing"
-- Current track is not from YouTube: "Current track is not a YouTube track"
-
-#### Interactive Search
-
-Search YouTube Music and take actions on results:
+**Search** offers fuzzy search with inline actions:
 
 ```bash
 $ ytmpctl search
 Search YouTube Music:
 > miles davis kind of blue
-
-Search results for "miles davis kind of blue":
-
   1. So What - Miles Davis (9:22)
   2. Freddie Freeloader - Miles Davis (9:33)
-  3. Blue in Green - Miles Davis (5:37)
-  4. All Blues - Miles Davis (11:33)
-  5. Flamenco Sketches - Miles Davis (9:26)
-  [... more results ...]
-
-Enter number (1-20), or 'q' to quit:
+  ...
 > 2
-
-Selected: Freddie Freeloader - Miles Davis
-
-Actions:
-  1. Play now
-  2. Add to queue
-  3. Start radio from this song
-  4. Cancel
-
-Enter choice (1-4):
-> 1
-
-✓ Now playing: Freddie Freeloader - Miles Davis
+Actions: 1) Play now  2) Add to queue  3) Start radio  4) Cancel
 ```
 
-**Available actions:**
-- **Play now**: Clear MPD queue and play the selected track immediately
-- **Add to queue**: Append track to queue without interrupting current playback
-- **Start radio**: Generate a radio playlist from the selected track (auto-applies)
-- **Cancel**: Exit without taking action
+## Likes & dislikes
 
-**Exit options:**
-- Empty query: Press Enter without typing to exit
-- During selection: Type 'q' to quit
-- Ctrl+C: Cancel at any prompt
-
-### Liking and Disliking Tracks
-
-ytmpd supports bidirectional sync for track ratings - you can like or dislike tracks from your MPD playback environment, and changes sync immediately to YouTube Music.
-
-**Commands:**
 ```bash
-ytmpctl like              # Toggle like for currently playing track
-ytmpctl dislike           # Toggle dislike for currently playing track
+ytmpctl like        # toggle like on current track
+ytmpctl dislike     # toggle dislike on current track
 ```
 
-**Toggle Behavior:**
+Behaviour is idempotent per direction and cross-cancels the opposite rating:
 
-Both commands use toggle logic for a natural user experience:
+| Current state | `like`   | `dislike` |
+|---------------|----------|-----------|
+| Neutral       | Liked    | Disliked  |
+| Liked         | Neutral  | Disliked  |
+| Disliked      | Liked    | Neutral   |
 
-**Like command:**
-- Neutral track → Like (✓ ✓ Liked: Artist - Title)
-- Liked track → Neutral (Removed like: Artist - Title)
-- Disliked track → Like (✓ ✓ Liked: Artist - Title)
+Liking a track immediately triggers a sync so the liked-songs playlist updates
+without waiting for the next interval.
 
-**Dislike command:**
-- Neutral track → Dislike (✗ ✗ Disliked: Artist - Title)
-- Disliked track → Neutral (Removed dislike: Artist - Title)
-- Liked track → Dislike (✗ ✗ Disliked: Artist - Title)
+**Known quirk:** YouTube Music's API reports disliked tracks as neutral, so
+`dislike` twice will dislike twice rather than toggle off. Use `like` to clear
+a dislike explicitly.
 
-**Sync Behavior:**
+### Like indicator
 
-When you like a song, ytmpd immediately triggers a sync to update your playlists. The liked song will appear in your "Liked Songs" playlist in MPD after the next sync completes.
-
-**Example Usage:**
-```bash
-# Like the currently playing track
-$ ytmpctl like
-✓ ✓ Liked: Miles Davis - So What
-
-Triggering sync to update playlists...
-Sync started in background
-
-# Toggle the like off
-$ ytmpctl like
-Removed like: Miles Davis - So What
-
-# Dislike the track
-$ ytmpctl dislike
-✗ ✗ Disliked: Miles Davis - So What
-
-# Switch from dislike back to like
-$ ytmpctl like
-✓ ✓ Liked: Miles Davis - So What
-
-Triggering sync to update playlists...
-Sync started in background
-```
-
-**Requirements:**
-- MPD must be playing a YouTube Music track (synced via ytmpd)
-- YouTube Music authentication must be configured
-
-**Error Messages:**
-- "Error: No track currently playing" - Start playback first with `mpc play`
-- "Error: Current track is not a YouTube Music track" - Only works with synced YouTube tracks
-- "Error: Failed to update rating" - Check network connection and authentication
-
-**Known Limitation:**
-
-Due to a YouTube Music API limitation, disliked tracks appear as neutral when queried. This means pressing "dislike" twice will dislike the track twice instead of toggling off. You can press "like" to clear a dislike state if needed.
-
-### Like Indicator
-
-ytmpd can mark liked songs with a visual tag in your playlists, so you can see at a glance which tracks are in your "Liked Songs" collection.
-
-When enabled, liked tracks in any playlist (except "Liked Songs" itself, where every track is liked by definition) get a tag appended or prepended to their title:
-
-```
-# Right alignment (default)
-Artist - Track Name [+1]
-
-# Left alignment
-[+1] Artist - Track Name
-```
-
-The tag, alignment, and whether the indicator is active are all configurable. For XSPF playlists, the indicator is applied to the `<title>` element only -- the `<creator>` (artist) stays clean.
-
-The indicator also works for radio playlists: if the seed song or any recommended track is in your liked songs, it will be tagged.
-
-**Enabling:**
-
-Add to `~/.config/ytmpd/config.yaml`:
+Tag liked tracks inside playlists so you can spot them at a glance:
 
 ```yaml
 like_indicator:
   enabled: true
-  tag: "+1"           # shown as [+1]; try "*", "LIKED", etc.
+  tag: "+1"           # shown as [+1]; "*", "LIKED", etc. work too
   alignment: right    # "left" or "right"
 ```
 
-Restart the daemon and trigger a sync (`ytmpctl sync`) to apply.
+Applies to every playlist except `YT: Liked Songs` itself (redundant there).
+Radio playlists get the same treatment.
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `enabled` | `false` | Enable like indicator tags in playlist titles |
-| `tag` | `+1` | String shown inside brackets (e.g., `+1` produces `[+1]`) |
-| `alignment` | `right` | Where to place the tag: `left` or `right` of the title |
+## History reporting
 
-## i3 Integration
+Feed completed plays back to YouTube Music so recommendations reflect what you
+actually listen to:
 
-### i3 Keybindings
-
-Update your i3 config (`~/.config/i3/config`) to use `mpc` instead of `ytmpctl`:
-
+```yaml
+history_reporting:
+  enabled: false         # opt-in
+  min_play_seconds: 30   # tracks shorter than this count as skips
 ```
-# MPD playback controls (ytmpd playlists)
+
+Runs as a background thread inside the daemon: watches MPD player state, times
+actual play duration (excluding pauses), calls YouTube Music's history API on
+each qualifying track.
+
+## Playlist format
+
+Two formats are supported; set `playlist_format` in config:
+
+- **`m3u`** — traditional, single `Name` field per track.
+- **`xspf`** — XML with separate `<creator>` / `<title>` / `<duration>` fields.
+  Requires `mpd_music_directory` (XSPF files go in `<music_dir>/_youtube/`).
+  Recommended for ncmpcpp users — you get colour-coded artist/title columns.
+
+## AirPlay bridge (optional)
+
+`extras/airplay-bridge/` ships a complete AirPlay stack built on
+[OwnTone](https://owntone.github.io/owntone-server/). It's independent of the
+ytmpd daemon — install it only if you want multi-room AirPlay + proper
+metadata on your receivers.
+
+**What you get:**
+
+- `speaker laptop|denon|kitchen|multi|status|list` — atomic routing across MPD
+  outputs, OwnTone speaker selection, and the PipeWire default sink. Handles
+  cold receivers (retries selection while an AVR wakes from standby).
+- `speaker-rofi` — rofi-driven speaker picker that discovers reachable AirPlay
+  receivers dynamically.
+- `vol-wrap up|down|mute` — routes volume keys to OwnTone when AirPlay is
+  active, PipeWire otherwise; does ratio-anchored scaling for multi-room.
+- `mpd_owntone_metadata.py` — systemd user service that bridges MPD metadata
+  (artist / title / album art) into OwnTone's metadata pipe, so receivers show
+  the current song instead of "mpd.pcm / Unknown artist". Album art is
+  resolved from MPD-embedded tags, folder art, then cached iTunes /
+  MusicBrainz lookups for YouTube tracks.
+
+**Install:**
+
+```bash
+cd extras/airplay-bridge
+./install.sh --check     # report what's missing, no changes
+./install.sh             # idempotent install (Arch/Manjaro; uses yay)
+```
+
+The installer sets up `~/.config/mpd-owntone-bridge/config.env`, drops the
+systemd user unit, wires up the PipeWire RAOP discovery dropin, and augments
+your `~/.i3/config` inside sentinel markers. Populate `SPEAKER_DENON` /
+`SPEAKER_KITCHEN` with the output IDs discovered during install.
+
+## i3 integration
+
+### Keybindings
+
+```text
+# Playback (mpd)
 bindsym $mod+Shift+p exec --no-startup-id mpc toggle
 bindsym $mod+Shift+s exec --no-startup-id mpc stop
 bindsym $mod+Shift+n exec --no-startup-id mpc next
 bindsym $mod+Shift+b exec --no-startup-id mpc prev
 
-# Like/dislike track ratings
-bindsym $mod+plus exec --no-startup-id ytmpctl like
+# Ratings
+bindsym $mod+plus  exec --no-startup-id ytmpctl like
 bindsym $mod+minus exec --no-startup-id ytmpctl dislike
 
-# Refresh i3blocks after control
+# Refresh i3blocks after a control change
 bindsym $mod+Shift+p exec --no-startup-id killall -SIGUSR1 i3blocks
-bindsym $mod+Shift+n exec --no-startup-id killall -SIGUSR1 i3blocks
 ```
 
-### i3blocks Status Display
-
-The `ytmpd-status` script shows MPD playback status with intelligent truncation that protects critical information.
-
-**Add to your i3blocks config** (`~/.config/i3blocks/config`):
+### i3blocks status
 
 ```ini
 [ytmpd]
@@ -655,371 +288,153 @@ interval=5
 separator_block_width=15
 ```
 
-**Reload i3blocks:**
+Output examples:
 
-```bash
-killall -SIGUSR1 i3blocks
-```
+- `▶ Queen - Bohemian Rhapsody [2:34/5:55]` (green, playing)
+- `⏸ The Beatles - Hey Jude [1:23/7:06]` (yellow, paused)
+- `⏹ MPD` (grey, stopped)
 
-The status block will display:
-- `▶ Queen - Bohemian Rhapsody [2:34/5:55]` (green) when playing
-- `⏸ The Beatles - Hey Jude [1:23/7:06]` (yellow) when paused
-- `⏹ MPD` (gray) when stopped
+Truncates adaptively under width pressure: timestamps stay, progress bar
+shrinks, song name ellipsises last.
 
-**Adaptive truncation:** When display width is constrained, the status script intelligently truncates while protecting essential information:
-- Timestamps (current/end time) are never truncated
-- Progress bar shrinks adaptively or hides if needed
-- Song name truncates with ellipsis as last resort
-
-See `examples/i3blocks.conf` for a complete example and advanced configuration options.
+See `examples/i3blocks.conf` for a full setup.
 
 ## Configuration
 
-Configuration is stored in `~/.config/ytmpd/config.yaml` and is created automatically with default values on first run.
+Config lives at `~/.config/ytmpd/config.yaml` and is created with defaults on
+first run. Full documentation of every option is in
+[`examples/config.yaml`](examples/config.yaml). Key settings:
 
-**Default configuration:**
-
-```yaml
-# Logging
-log_level: INFO
-log_file: ~/.config/ytmpd/ytmpd.log
-
-# MPD Integration
-mpd_socket_path: ~/.config/mpd/socket  # Or use TCP: "localhost:6600"
-sync_interval_minutes: 30
-enable_auto_sync: true
-playlist_prefix: "YT: "
-stream_cache_hours: 5
-
-# Legacy paths (maintained for compatibility)
-socket_path: ~/.config/ytmpd/socket
-state_file: ~/.config/ytmpd/state.json
-```
-
-See `examples/config.yaml` for documentation of all options.
-
-### Configuration Options
-
-#### MPD Integration
-- **mpd_socket_path**: MPD connection - Unix socket path (e.g., `~/.config/mpd/socket`) or TCP `host:port` (e.g., `localhost:6600`) (default: `~/.config/mpd/socket`)
-- **sync_interval_minutes**: How often to auto-sync in minutes (default: 30)
-- **enable_auto_sync**: Enable/disable periodic auto-sync (default: true)
-- **playlist_prefix**: Prefix for YouTube playlists in MPD (default: "YT: ")
-- **stream_cache_hours**: How long to cache stream URLs in hours (default: 5)
-
-#### Logging
-- **log_level**: Logging verbosity (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- **log_file**: Path to log file
+| Setting                 | Default                  | Notes |
+|-------------------------|--------------------------|-------|
+| `mpd_socket_path`       | `~/.config/mpd/socket`   | Unix socket path or `host:port` |
+| `mpd_music_directory`   | `~/Music`                | Required if `playlist_format: xspf` |
+| `sync_interval_minutes` | `30`                     | Set `enable_auto_sync: false` to disable |
+| `playlist_prefix`       | `"YT: "`                 | Prefix for synced playlists in MPD |
+| `playlist_format`       | `m3u`                    | `m3u` or `xspf` |
+| `stream_cache_hours`    | `5`                      | Buffer before 6-hour URL expiry |
+| `radio_playlist_limit`  | `25`                     | 10–50 |
+| `auto_auth.enabled`     | `false`                  | Firefox cookie auto-refresh |
+| `history_reporting.enabled` | `false`              | Report plays to YT Music |
+| `like_indicator.enabled`    | `false`              | Tag liked tracks in playlists |
 
 ## Troubleshooting
 
 ### Daemon won't start
 
-**Problem**: Daemon exits immediately or shows errors in log
-
-**Solutions**:
-
-1. **Check MPD is running:**
-   ```bash
-   mpc status
-   ```
-   If MPD isn't running:
-   ```bash
-   systemctl --user start mpd
-   ```
-
-2. **Check MPD socket path:**
-   ```bash
-   ls ~/.config/mpd/socket
-   ```
-   If missing, check your MPD configuration (`~/.config/mpd/mpd.conf`) for the bind address.
-
-3. **Check YouTube authentication:**
-   ```bash
-   ls ~/.config/ytmpd/browser.json
-   ```
-   If missing, run `python -m ytmpd.ytmusic setup-browser`
-
-4. **Check logs:**
-   ```bash
-   tail -f ~/.config/ytmpd/ytmpd.log
-   ```
+- `mpc status` — is MPD up? `systemctl --user start mpd` if not.
+- `ls ~/.config/mpd/socket` — does the socket ytmpd targets actually exist?
+- `ls ~/.config/ytmpd/browser.json` — auth file present? Run `python -m
+  ytmpd.ytmusic setup-browser` or `ytmpctl auth --auto`.
+- `tail -f ~/.config/ytmpd/ytmpd.log`.
 
 ### No playlists in MPD
 
-**Problem**: ytmpctl status shows sync succeeded but no playlists appear in MPD
+- `ytmpctl sync` then `ytmpctl status` — did it succeed?
+- `mpc lsplaylists | grep '^YT:'` — are they actually there under the prefix?
+- `grep ERROR ~/.config/ytmpd/ytmpd.log`.
 
-**Solutions**:
+### Playback silent
 
-1. **Trigger manual sync:**
-   ```bash
-   ytmpctl sync
-   ```
-
-2. **Check sync status:**
-   ```bash
-   ytmpctl status
-   ```
-   Look for errors or failed playlists.
-
-3. **List MPD playlists:**
-   ```bash
-   mpc lsplaylists | grep "^YT:"
-   ```
-
-4. **Check ytmpd logs:**
-   ```bash
-   grep ERROR ~/.config/ytmpd/ytmpd.log
-   ```
-
-### Playback not working
-
-**Problem**: Playlists load but tracks won't play
-
-**Solutions**:
-
-1. **Check MPD status:**
-   ```bash
-   mpc status
-   ```
-
-2. **Check MPD outputs:**
-   ```bash
-   mpc outputs
-   ```
-   Enable disabled outputs:
-   ```bash
-   mpc enable 1
-   ```
-
-3. **Check MPD logs:**
-   ```bash
-   journalctl --user -u mpd -f
-   ```
+- `mpc outputs` — is any output enabled? `mpc enable <n>` to toggle one on.
+- AirPlay via the bridge: `extras/airplay-bridge/speaker status` — any
+  receiver still selected? If not, the receiver likely dropped the RTSP
+  session (standby, source switch, network blip). Re-pick it.
 
 ### Stream URLs expired
 
-**Problem**: Tracks fail to play after several hours
+YouTube URLs die at ~6 hours. The daemon refreshes them on every sync cycle;
+force one with `ytmpctl sync`.
 
-**Cause**: YouTube stream URLs expire after ~6 hours. ytmpd caches URLs for 5 hours to provide a 1-hour buffer.
+### Authentication failures
 
-**Solution**:
-- **Automatic**: Daemon re-syncs periodically (default every 30 minutes)
-- **Manual**: Trigger immediate sync:
-  ```bash
-  ytmpctl sync
-  ```
+- With auto-auth on: check you're still logged into YouTube Music in Firefox,
+  then `ytmpctl auth --auto` to force a cookie re-extract.
+- Without: re-run `python -m ytmpd.ytmusic setup-browser` and paste fresh
+  headers.
 
-### Authentication issues
+### i3blocks stale
 
-**Problem**: "Failed to authenticate" or HTTP 400/401 errors in logs
+- `killall -SIGUSR1 i3blocks` forces a refresh.
+- `bin/ytmpd-status` directly to check the script output.
+- `chmod +x bin/ytmpd-status` if permissions are off.
 
-**Solutions**:
+## How it works
 
-1. **If auto-auth is enabled:** Check that you're logged in to YouTube Music in Firefox, then wait for the next refresh cycle or run `ytmpctl auth --auto` manually.
+MPD doesn't speak YouTube, so ytmpd runs a local HTTP helper on
+`localhost:8080` that re-serves each track's yt-dlp-resolved stream with
+injected ICY metadata. Synced playlists point MPD at `http://localhost:8080/
+proxy/<video_id>`; the proxy fetches the upstream audio, prepends ICY headers,
+and streams back. This is an implementation detail — you don't configure it
+day-to-day — but it's how MPD knows what to display in the playlist view and
+how the history reporter identifies YouTube tracks.
 
-2. **Refresh browser authentication manually:**
-   ```bash
-   python -m ytmpd.ytmusic setup-browser
-   ```
-
-3. Make sure you're logged in to YouTube Music in your browser before extracting headers
-
-4. Try using a different browser or incognito mode to get fresh headers
-
-### i3blocks not updating
-
-**Problem**: Status block shows old information
-
-**Solutions**:
-
-1. **Manually refresh:**
-   ```bash
-   killall -SIGUSR1 i3blocks
-   ```
-
-2. **Test status script:**
-   ```bash
-   bin/ytmpd-status
-   ```
-
-3. **Ensure script is executable:**
-   ```bash
-   chmod +x bin/ytmpd-status
-   ```
+Expired URLs are re-resolved in the background; the proxy falls back to the
+cached URL if refresh fails.
 
 ## Development
 
-### Running tests
-
 ```bash
-# Run all tests (unit + integration)
-pytest
-
-# Run tests with coverage report
+pytest                                      # full suite
 pytest --cov=ytmpd --cov-report=term-missing
+pytest tests/integration/                   # integration only
 
-# Run only unit tests
-pytest tests/ --ignore=tests/integration/
-
-# Run only integration tests
-pytest tests/integration/
-
-# Run specific test file
-pytest tests/test_sync_engine.py
-```
-
-Current test coverage: **72%** (260 tests)
-
-### Type checking
-
-```bash
 mypy ytmpd/
-```
-
-### Linting
-
-```bash
-# Check for issues
-ruff check ytmpd/
-
-# Auto-fix issues
 ruff check --fix ytmpd/
-```
-
-### Formatting
-
-```bash
-# Format code
 ruff format ytmpd/
 ```
 
-## Architecture
-
-### Components
-
-1. **ytmpd daemon** (`ytmpd/daemon.py`): Background sync service with periodic loop
-2. **MPD client** (`ytmpd/mpd_client.py`): Wrapper around python-mpd2 for playlist management
-3. **YouTube Music client** (`ytmpd/ytmusic.py`): Fetches playlists and tracks via ytmusicapi
-4. **Stream resolver** (`ytmpd/stream_resolver.py`): Resolves video IDs to stream URLs via yt-dlp
-5. **Sync engine** (`ytmpd/sync_engine.py`): Orchestrates the YouTube → MPD sync
-6. **ytmpctl client** (`bin/ytmpctl`): CLI for sync control and status
-7. **i3blocks script** (`bin/ytmpd-status`): Status formatter for i3blocks display
-
-### Data Flow
-
-```
-YouTube Music Playlists
-         ↓ (ytmusicapi)
-   YTMusicClient.get_user_playlists()
-         ↓
-   SyncEngine.sync_all_playlists()
-         ↓
-   StreamResolver.resolve_batch(video_ids)
-         ↓ (yt-dlp)
-   Stream URLs (cached 5 hours)
-         ↓
-   MPDClient.create_or_replace_playlist()
-         ↓ (python-mpd2)
-   MPD Server
-         ↓
-   mpc / ncmpcpp / cantata
-         ↓
-   Audio output
-```
-
-### Socket Protocol
-
-The daemon listens on a simple Unix socket for sync commands:
-
-**Client commands:**
-```
-sync          # Trigger immediate sync
-status        # Get sync status and statistics
-list          # List YouTube playlists
-quit          # Shutdown daemon
-```
-
-**Server responses** (JSON):
-```json
-{
-  "success": true,
-  "message": "Sync triggered",
-  "playlists_synced": 5,
-  "tracks_added": 150
-}
-```
-
-## Project Structure
+## Project structure
 
 ```
 ytmpd/
-├── ytmpd/                      # Main package
-│   ├── __init__.py
-│   ├── __main__.py             # Daemon entry point
-│   ├── config.py               # Configuration management
-│   ├── cookie_extract.py       # Firefox cookie extraction for auto-auth
-│   ├── daemon.py               # Main sync daemon
-│   ├── mpd_client.py           # MPD client wrapper (python-mpd2)
-│   ├── notify.py               # Desktop notifications via notify-send
-│   ├── ytmusic.py              # YouTube Music API wrapper
-│   ├── stream_resolver.py      # Video ID → stream URL resolver
-│   ├── sync_engine.py          # Sync orchestration
-│   └── exceptions.py           # Custom exceptions
+├── ytmpd/                       # Main package
+│   ├── __main__.py              # Daemon entry point
+│   ├── config.py                # Config load/validate
+│   ├── cookie_extract.py        # Firefox cookie extraction
+│   ├── daemon.py                # Sync loop + background threads
+│   ├── history_reporter.py      # MPD → YT Music history
+│   ├── icy_proxy.py             # Local stream + metadata proxy
+│   ├── mpd_client.py            # python-mpd2 wrapper
+│   ├── notify.py                # Desktop notifications
+│   ├── rating.py                # Like / dislike logic
+│   ├── stream_resolver.py       # Video ID → stream URL (yt-dlp)
+│   ├── sync_engine.py           # Sync orchestration
+│   ├── track_store.py           # SQLite track metadata store
+│   ├── xspf_generator.py        # XSPF playlist writer
+│   ├── ytmusic.py               # YouTube Music API wrapper
+│   └── exceptions.py            # Custom exceptions
 ├── bin/
-│   ├── ytmpctl                 # Sync control CLI
-│   └── ytmpd-status            # i3blocks status script
-├── tests/                      # Test suite
-│   ├── integration/            # Integration tests
-│   │   └── test_full_workflow.py
-│   ├── test_config.py
-│   ├── test_daemon.py
-│   ├── test_mpd_client.py
-│   ├── test_stream_resolver.py
-│   ├── test_sync_engine.py
-│   ├── test_ytmpctl.py
-│   └── test_ytmusic.py
-├── examples/                   # Example configurations
-│   ├── config.yaml             # Example ytmpd config
-│   └── i3blocks.conf           # Example i3blocks configuration
-├── docs/
-│   ├── agent/                  # AI agent workflow documentation
-│   └── MIGRATION.md            # Migration guide from v1
-├── pyproject.toml              # Project metadata and dependencies
-├── README.md
-└── .gitignore
+│   ├── ytmpctl                  # Sync / rating / search CLI
+│   └── ytmpd-status             # i3blocks status script
+├── extras/
+│   └── airplay-bridge/          # Optional OwnTone AirPlay stack
+│       ├── install.sh
+│       ├── speaker              # Routing tool
+│       ├── speaker-rofi         # rofi speaker picker
+│       ├── vol-wrap             # Smart volume key router
+│       └── mpd_owntone_metadata.py  # Metadata pipe bridge
+├── examples/
+│   ├── config.yaml              # Documented full config
+│   └── i3blocks.conf            # Example i3blocks block
+├── docs/                        # Design docs + migration notes
+└── tests/                       # Unit + integration tests
 ```
 
 ## Migration from v1
 
-If you're upgrading from the old ytmpd architecture (socket-based command server), see [docs/MIGRATION.md](docs/MIGRATION.md) for a detailed migration guide.
-
-**Key changes:**
-- ytmpd is now a sync daemon, not a command server
-- Playback control moved to MPD (`mpc` commands)
-- YouTube playlists appear in MPD with "YT: " prefix
-- `ytmpctl` now focuses on sync operations (not playback)
+If you're coming from the old command-server architecture, see
+[`docs/MIGRATION.md`](docs/MIGRATION.md). Summary: ytmpctl is now a sync tool,
+not a playback tool; MPD owns playback.
 
 ## License
 
 MIT
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit issues and pull requests.
-
-### Development workflow
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and ensure coverage stays above 70%
-5. Run type checking and linting
-6. Submit a pull request
-
 ## Acknowledgments
 
-- Built with [ytmusicapi](https://github.com/sigma67/ytmusicapi) by sigma67
-- Built with [python-mpd2](https://github.com/Mic92/python-mpd2) for MPD integration
-- Built with [yt-dlp](https://github.com/yt-dlp/yt-dlp) for stream URL extraction
-- Inspired by [MPD](https://www.musicpd.org/) (Music Player Daemon)
+- [ytmusicapi](https://github.com/sigma67/ytmusicapi) by sigma67
+- [python-mpd2](https://github.com/Mic92/python-mpd2)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- [OwnTone](https://owntone.github.io/owntone-server/) for the AirPlay bridge
+- [MPD](https://www.musicpd.org/) itself

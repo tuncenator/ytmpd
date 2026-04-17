@@ -52,6 +52,37 @@ owntone_get_volume() {
   "${CURL[@]}" "${OWNTONE_API}/outputs/$1" | jq -r '.volume // empty'
 }
 
+owntone_is_selected() {
+  "${CURL[@]}" "${OWNTONE_API}/outputs/$1" | jq -r '.selected // false'
+}
+
+# Cold receivers (e.g., an AVR waking from standby) often reject the first RTSP
+# handshake; owntone then flips `selected` back to false. Poll and re-select
+# until every target sticks, or give up after a handful of attempts.
+ensure_selected_all() {
+  local ids=("$@") attempt id any_missing
+  for attempt in 1 2 3 4 5; do
+    sleep 1
+    any_missing=0
+    for id in "${ids[@]}"; do
+      if [[ "$(owntone_is_selected "$id")" != "true" ]]; then
+        any_missing=1
+        warn "speaker $id not ready (attempt $attempt/5), re-selecting"
+        owntone_set_selected "$id" true
+      fi
+    done
+    (( any_missing == 0 )) && return 0
+  done
+  local failed=0
+  for id in "${ids[@]}"; do
+    if [[ "$(owntone_is_selected "$id")" != "true" ]]; then
+      warn "speaker $id failed to activate (receiver off or unreachable?)"
+      failed=1
+    fi
+  done
+  return $failed
+}
+
 owntone_deselect_all_airplay() {
   local ids
   ids=$(owntone_outputs_json | jq -r '.outputs[] | select(.type | startswith("AirPlay")) | .id')
@@ -121,6 +152,7 @@ go_airplay() {
   for id in "${ids[@]}"; do
     owntone_set_selected "$id" true
   done
+  ensure_selected_all "${ids[@]}" || true
   # If MPD is playing, kick owntone to start so the pipe is consumed.
   if "${MPC[@]}" status 2>/dev/null | grep -q '^\[playing\]'; then
     owntone_player_play
@@ -131,10 +163,9 @@ go_airplay() {
   else
     clear_multi_baseline
   fi
-  # Give owntone a moment to open the new RTSP session, then nudge the bridge
-  # so the metadata lands in the fresh session (otherwise the receiver shows
-  # the pipe's default "mpd.pcm / Unknown artist" until MPD changes tracks).
-  sleep 0.8
+  # Nudge the bridge so the metadata lands in the fresh RTSP session
+  # (otherwise the receiver shows the pipe's default "mpd.pcm / Unknown
+  # artist" until MPD changes tracks).
   nudge_bridge_reemit
 }
 
