@@ -1,9 +1,9 @@
 """Tests for ytmpd-status CLI argument parsing and configuration."""
 
 import argparse
-import importlib.util
 import os
 import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,7 +16,7 @@ _script_path = Path(__file__).parent.parent / "bin" / "ytmpd-status"
 _ytmpd_status_code = _script_path.read_text()
 
 # Create a module object with unique name for CLI tests
-import types
+
 ytmpd_status = types.ModuleType("ytmpd_status_cli_tests")
 ytmpd_status.__file__ = str(_script_path)
 
@@ -55,11 +55,11 @@ class TestArgumentParsing:
             assert args.show_position is False
 
             # Color defaults
-            assert args.color_youtube_playing == "#FF6B35"
-            assert args.color_youtube_paused == "#FFB84D"
-            assert args.color_local_playing == "#00FF00"
-            assert args.color_local_paused == "#FFFF00"
-            assert args.color_stopped == "#808080"
+            assert args.color_youtube_playing == "#f7768e"
+            assert args.color_youtube_paused == "#d9677b"
+            assert args.color_local_playing == "#7dcfff"
+            assert args.color_local_paused == "#5ab3dd"
+            assert args.color_stopped == "#565f89"
 
             # Icon defaults
             assert args.icon_playing == "▶"
@@ -86,7 +86,10 @@ class TestArgumentParsing:
 
     def test_parse_args_progress_bar_options(self):
         """Test progress bar option parsing."""
-        with patch("sys.argv", ["ytmpd-status", "--no-show-bar", "--bar-length", "15", "--bar-style", "blocks"]):
+        with patch(
+            "sys.argv",
+            ["ytmpd-status", "--no-show-bar", "--bar-length", "15", "--bar-style", "blocks"],
+        ):
             args = ytmpd_status.parse_arguments()
             assert args.show_bar is False
             assert args.bar_length == 15
@@ -112,11 +115,16 @@ class TestArgumentParsing:
             "sys.argv",
             [
                 "ytmpd-status",
-                "--color-youtube-playing", "#FF0000",
-                "--color-youtube-paused", "#FF00FF",
-                "--color-local-playing", "#00FFFF",
-                "--color-local-paused", "#FFFF00",
-                "--color-stopped", "#000000",
+                "--color-youtube-playing",
+                "#FF0000",
+                "--color-youtube-paused",
+                "#FF00FF",
+                "--color-local-playing",
+                "#00FFFF",
+                "--color-local-paused",
+                "#FFFF00",
+                "--color-stopped",
+                "#000000",
             ],
         ):
             args = ytmpd_status.parse_arguments()
@@ -132,9 +140,12 @@ class TestArgumentParsing:
             "sys.argv",
             [
                 "ytmpd-status",
-                "--icon-playing", "►",
-                "--icon-paused", "||",
-                "--icon-stopped", "■",
+                "--icon-playing",
+                "►",
+                "--icon-paused",
+                "||",
+                "--icon-stopped",
+                "■",
             ],
         ):
             args = ytmpd_status.parse_arguments()

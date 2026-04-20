@@ -20,11 +20,13 @@ Progress Bar Styles:
     simple: #####----- (ASCII fallback)
 
 Color Codes (for i3blocks):
-    YouTube Playing: #FF6B35 (orange)
-    YouTube Paused: #FFB84D (light orange)
-    Local Playing: #00FF00 (green)
-    Local Paused: #FFFF00 (yellow)
-    Stopped: #808080 (gray)
+    YouTube Playing: #f7768e (pink)
+    YouTube Paused: #d9677b (deeper pink)
+    Local Playing: #7dcfff (cyan)
+    Local Paused: #5ab3dd (deeper cyan)
+    Stopped: #565f89 (slate)
+    Auth Invalid: #ff5577 (warning pink)
+    Auth Refresh Failing: #e0af68 (amber)
 """
 
 # Auto-detect and use venv if available
@@ -816,32 +818,32 @@ Examples:
     color_group.add_argument(
         "--color-youtube-playing",
         type=validate_color,
-        default=os.environ.get("YTMPD_STATUS_COLOR_YOUTUBE_PLAYING", "#FF6B35"),
-        help="Color for YouTube playing (default: #FF6B35)",
+        default=os.environ.get("YTMPD_STATUS_COLOR_YOUTUBE_PLAYING", "#f7768e"),
+        help="Color for YouTube playing (default: #f7768e)",
     )
     color_group.add_argument(
         "--color-youtube-paused",
         type=validate_color,
-        default=os.environ.get("YTMPD_STATUS_COLOR_YOUTUBE_PAUSED", "#FFB84D"),
-        help="Color for YouTube paused (default: #FFB84D)",
+        default=os.environ.get("YTMPD_STATUS_COLOR_YOUTUBE_PAUSED", "#d9677b"),
+        help="Color for YouTube paused (default: #d9677b)",
     )
     color_group.add_argument(
         "--color-local-playing",
         type=validate_color,
-        default=os.environ.get("YTMPD_STATUS_COLOR_LOCAL_PLAYING", "#00FF00"),
-        help="Color for local playing (default: #00FF00)",
+        default=os.environ.get("YTMPD_STATUS_COLOR_LOCAL_PLAYING", "#7dcfff"),
+        help="Color for local playing (default: #7dcfff)",
     )
     color_group.add_argument(
         "--color-local-paused",
         type=validate_color,
-        default=os.environ.get("YTMPD_STATUS_COLOR_LOCAL_PAUSED", "#FFFF00"),
-        help="Color for local paused (default: #FFFF00)",
+        default=os.environ.get("YTMPD_STATUS_COLOR_LOCAL_PAUSED", "#5ab3dd"),
+        help="Color for local paused (default: #5ab3dd)",
     )
     color_group.add_argument(
         "--color-stopped",
         type=validate_color,
-        default=os.environ.get("YTMPD_STATUS_COLOR_STOPPED", "#808080"),
-        help="Color for stopped (default: #808080)",
+        default=os.environ.get("YTMPD_STATUS_COLOR_STOPPED", "#565f89"),
+        help="Color for stopped (default: #565f89)",
     )
 
     # Icon options
@@ -1363,11 +1365,11 @@ def main() -> None:
             # Show auth error prominently
             print(f"{stop_icon} MPD stopped | Auth invalid")
             print(f"{stop_icon} Auth invalid")  # Short text
-            print("#FF0000")  # Red color for auth error
+            print("#ff5577")  # Red color for auth error
         elif auto_refresh_failures > 0:
             print(f"{stop_icon} MPD stopped | Auth refresh failing")
             print(f"{stop_icon} MPD stopped")  # Short text
-            print("#FFA500")  # Orange for refresh failures
+            print("#e0af68")  # Orange for refresh failures
         else:
             print(f"{stop_icon} MPD stopped")
             print(f"{stop_icon} MPD stopped")  # Short text
@@ -1397,11 +1399,11 @@ def main() -> None:
                 # Show auth error prominently
                 print(f"{stop_icon} Stopped | YTM Auth invalid")
                 print(f"{stop_icon} Auth invalid")  # Short text
-                print("#FF0000")  # Red color for auth error
+                print("#ff5577")  # Red color for auth error
             elif auto_refresh_failures > 0:
                 print(f"{stop_icon} Stopped | Auth refresh failing")
                 print(f"{stop_icon} Stopped")  # Short text
-                print("#FFA500")  # Orange for refresh failures
+                print("#e0af68")  # Orange for refresh failures
             else:
                 print(f"{stop_icon} Stopped")
                 print(f"{stop_icon} Stopped")  # Short text
@@ -1446,9 +1448,9 @@ def main() -> None:
         # Override color on auth failure or refresh failures
         auth_valid, _auth_error, auto_refresh_failures = get_auth_status()
         if not auth_valid:
-            color = "#FF0000"  # Red for auth failure
+            color = "#ff5577"  # Red for auth failure
         elif auto_refresh_failures > 0:
-            color = "#FFA500"  # Orange for refresh failures
+            color = "#e0af68"  # Orange for refresh failures
 
         # Get playlist context
         playlist_ctx = get_playlist_context(client)

@@ -8,16 +8,18 @@ import importlib.machinery
 import importlib.util
 import sqlite3
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Import the script module
 script_path = Path(__file__).parent.parent / "bin" / "ytmpd-status"
-spec = importlib.util.spec_from_file_location("ytmpd_status", script_path,
-                                              loader=importlib.machinery.SourceFileLoader("ytmpd_status", str(script_path)))
+spec = importlib.util.spec_from_file_location(
+    "ytmpd_status",
+    script_path,
+    loader=importlib.machinery.SourceFileLoader("ytmpd_status", str(script_path)),
+)
 ytmpd_status = importlib.util.module_from_spec(spec)
 sys.modules["ytmpd_status"] = ytmpd_status
 spec.loader.exec_module(ytmpd_status)
@@ -101,7 +103,7 @@ class TestGetTrackType:
         """)
         cursor.execute(
             "INSERT INTO tracks (file, video_id, title, artist) VALUES (?, ?, ?, ?)",
-            ("_youtube/test.xspf", "dQw4w9WgXcQ", "Test Song", "Test Artist")
+            ("_youtube/test.xspf", "dQw4w9WgXcQ", "Test Song", "Test Artist"),
         )
         conn.commit()
         conn.close()
@@ -265,7 +267,7 @@ class TestColorSelection:
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
         assert len(lines) == 3
-        assert lines[2] == "#FF6B35"  # Orange for YouTube playing
+        assert lines[2] == "#f7768e"  # Pink for YouTube playing
 
     @patch("ytmpd_status.get_mpd_client")
     @patch("sys.argv", ["ytmpd-status"])
@@ -291,7 +293,7 @@ class TestColorSelection:
 
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
-        assert lines[2] == "#FFB84D"  # Light orange for YouTube paused
+        assert lines[2] == "#d9677b"  # Deeper pink for YouTube paused
 
     @patch("ytmpd_status.get_mpd_client")
     @patch("sys.argv", ["ytmpd-status"])
@@ -317,7 +319,7 @@ class TestColorSelection:
 
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
-        assert lines[2] == "#00FF00"  # Green for local playing
+        assert lines[2] == "#7dcfff"  # Cyan for local playing
 
     @patch("ytmpd_status.get_mpd_client")
     @patch("sys.argv", ["ytmpd-status"])
@@ -343,7 +345,7 @@ class TestColorSelection:
 
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
-        assert lines[2] == "#FFFF00"  # Yellow for local paused
+        assert lines[2] == "#5ab3dd"  # Deeper cyan for local paused
 
     @patch("sys.argv", ["ytmpd-status"])
     @patch("ytmpd_status.get_mpd_client")
@@ -358,7 +360,7 @@ class TestColorSelection:
         lines = captured.out.strip().split("\n")
         assert len(lines) == 3
         assert "MPD stopped" in lines[0]
-        assert lines[2] == "#808080"  # Gray
+        assert lines[2] == "#565f89"  # Slate
 
     @patch("sys.argv", ["ytmpd-status"])
     @patch("ytmpd_status.get_mpd_client")
@@ -376,7 +378,7 @@ class TestColorSelection:
         lines = captured.out.strip().split("\n")
         assert len(lines) == 3
         assert "Stopped" in lines[0]
-        assert lines[2] == "#808080"  # Gray
+        assert lines[2] == "#565f89"  # Slate
 
 
 class TestOutputFormatting:
@@ -803,7 +805,7 @@ class TestGetPlaylistContext:
         mock_client = MagicMock()
         mock_client.status.return_value = {
             "song": "4",  # 0-indexed position (5th song)
-            "playlistlength": "10"
+            "playlistlength": "10",
         }
         mock_client.currentsong.return_value = {"title": "Current"}
 
@@ -825,14 +827,9 @@ class TestGetPlaylistContext:
     def test_first_track_in_playlist(self):
         """Test context when on first track."""
         mock_client = MagicMock()
-        mock_client.status.return_value = {
-            "song": "0",
-            "playlistlength": "5"
-        }
+        mock_client.status.return_value = {"song": "0", "playlistlength": "5"}
         mock_client.currentsong.return_value = {"title": "First"}
-        mock_client.playlistinfo.return_value = [
-            {"artist": "Next Artist", "title": "Next Title"}
-        ]
+        mock_client.playlistinfo.return_value = [{"artist": "Next Artist", "title": "Next Title"}]
 
         context = ytmpd_status.get_playlist_context(mock_client)
 
@@ -846,12 +843,10 @@ class TestGetPlaylistContext:
         mock_client = MagicMock()
         mock_client.status.return_value = {
             "song": "4",  # Last track (0-indexed)
-            "playlistlength": "5"
+            "playlistlength": "5",
         }
         mock_client.currentsong.return_value = {"title": "Last"}
-        mock_client.playlistinfo.return_value = [
-            {"artist": "Prev Artist", "title": "Prev Title"}
-        ]
+        mock_client.playlistinfo.return_value = [{"artist": "Prev Artist", "title": "Prev Title"}]
 
         context = ytmpd_status.get_playlist_context(mock_client)
 
@@ -863,10 +858,7 @@ class TestGetPlaylistContext:
     def test_single_track_playlist(self):
         """Test context with only one track."""
         mock_client = MagicMock()
-        mock_client.status.return_value = {
-            "song": "0",
-            "playlistlength": "1"
-        }
+        mock_client.status.return_value = {"song": "0", "playlistlength": "1"}
         mock_client.currentsong.return_value = {"title": "Only"}
 
         context = ytmpd_status.get_playlist_context(mock_client)
@@ -879,9 +871,7 @@ class TestGetPlaylistContext:
     def test_no_song_playing(self):
         """Test context when no song is playing."""
         mock_client = MagicMock()
-        mock_client.status.return_value = {
-            "playlistlength": "5"
-        }  # No "song" key
+        mock_client.status.return_value = {"playlistlength": "5"}  # No "song" key
         mock_client.currentsong.return_value = {}
 
         context = ytmpd_status.get_playlist_context(mock_client)
@@ -929,7 +919,7 @@ class TestGetSyncStatus:
         """)
         cursor.execute(
             "INSERT INTO tracks (video_id, stream_url) VALUES (?, ?)",
-            ("dQw4w9WgXcQ", "https://youtube.com/stream/url")
+            ("dQw4w9WgXcQ", "https://youtube.com/stream/url"),
         )
         conn.commit()
         conn.close()
@@ -956,7 +946,7 @@ class TestGetSyncStatus:
         """)
         cursor.execute(
             "INSERT INTO tracks (video_id, stream_url) VALUES (?, ?)",
-            ("dQw4w9WgXcQ", None)  # NULL stream_url
+            ("dQw4w9WgXcQ", None),  # NULL stream_url
         )
         conn.commit()
         conn.close()
@@ -1023,7 +1013,9 @@ class TestSmartTruncate:
 
     def test_truncate_middle_of_long_title(self):
         """Test middle truncation for very long titles."""
-        text = "Artist - This is an extremely long song title that should be truncated from the middle"
+        text = (
+            "Artist - This is an extremely long song title that should be truncated from the middle"
+        )
         result = ytmpd_status.smart_truncate(text, 50)
         assert len(result) <= 50
         assert "Artist" in result
@@ -1246,7 +1238,7 @@ class TestNextPrevDisplay:
             "current_pos": 5,
             "total": 10,
             "next": {"artist": "Next Artist", "title": "Next Song"},
-            "prev": None
+            "prev": None,
         }
         mock_sync.return_value = "local"
 
@@ -1285,7 +1277,7 @@ class TestNextPrevDisplay:
             "current_pos": 5,
             "total": 10,
             "next": None,
-            "prev": {"artist": "Prev Artist", "title": "Prev Song"}
+            "prev": {"artist": "Prev Artist", "title": "Prev Song"},
         }
         mock_sync.return_value = "local"
 
