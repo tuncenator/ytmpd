@@ -632,8 +632,8 @@ class TestProgressBarIntegration:
         captured = capsys.readouterr()
         lines = captured.out.strip().split("\n")
 
-        # Should contain smooth style bar (▰▱)
-        assert "▰" in lines[0] or "▱" in lines[0]
+        # Should contain blocks style bar (█░) -- auto mode always uses blocks now
+        assert "█" in lines[0] or "░" in lines[0]
         # Should have time before and after bar
         assert "0:30" in lines[0]
         assert "1:00" in lines[0]

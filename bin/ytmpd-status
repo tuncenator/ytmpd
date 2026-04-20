@@ -15,8 +15,8 @@ Environment Variables (deprecated - use CLI args instead):
     YTMPD_STATUS_COMPACT: Minimal output mode (default: false)
 
 Progress Bar Styles:
-    blocks: █████░░░░░ (used for local tracks)
-    smooth: ▰▰▰▰▰▱▱▱▱▱ (used for YouTube tracks)
+    blocks: █████░░░░░ (default for all tracks)
+    smooth: ▰▰▰▰▰▱▱▱▱▱ (opt-in via --bar-style smooth)
     simple: #####----- (ASCII fallback)
 
 Color Codes (for i3blocks):
@@ -1124,7 +1124,7 @@ def display_status(client: MPDClient, args, persist_mode: bool = False) -> None:
                             if bar_style:
                                 style = bar_style
                             else:
-                                style = "smooth" if track_type == "youtube" else "blocks"
+                                style = "blocks"
                             filled_blocks = calculate_progress(
                                 elapsed_float, duration_float, bar_length
                             )
@@ -1467,11 +1467,7 @@ def main() -> None:
                     elapsed_float = float(elapsed)
                     duration_float = float(duration)
                     if duration_float > 0:
-                        style = (
-                            bar_style
-                            if bar_style
-                            else ("smooth" if track_type == "youtube" else "blocks")
-                        )
+                        style = bar_style if bar_style else "blocks"
                         filled_blocks = calculate_progress(
                             elapsed_float, duration_float, bar_length
                         )
@@ -1524,7 +1520,7 @@ def main() -> None:
                         if bar_style:
                             style = bar_style
                         else:
-                            style = "smooth" if track_type == "youtube" else "blocks"
+                            style = "blocks"
 
                         # Calculate and render progress bar
                         filled_blocks = calculate_progress(
