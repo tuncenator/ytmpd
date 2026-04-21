@@ -12,16 +12,14 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 # Import the script module with a unique name to avoid conflicts with unit tests
 script_path = Path(__file__).parent.parent.parent / "bin" / "ytmpd-status"
 spec = importlib.util.spec_from_file_location(
     "ytmpd_status_integration",
     script_path,
-    loader=importlib.machinery.SourceFileLoader("ytmpd_status_integration", str(script_path))
+    loader=importlib.machinery.SourceFileLoader("ytmpd_status_integration", str(script_path)),
 )
 ytmpd_status = importlib.util.module_from_spec(spec)
 sys.modules["ytmpd_status_integration"] = ytmpd_status
@@ -64,6 +62,7 @@ class TestIntegrationScenarios:
     def teardown_method(self):
         """Clean up test fixtures."""
         import shutil
+
         shutil.rmtree(self.temp_dir)
 
         # Restore original environment variables
@@ -73,8 +72,13 @@ class TestIntegrationScenarios:
         # Stop argv patcher
         self.argv_patcher.stop()
 
-    def _create_mock_mpd_client(self, status_dict: dict, currentsong_dict: dict,
-                                 playlist_length: int = 10, position: int = 5):
+    def _create_mock_mpd_client(
+        self,
+        status_dict: dict,
+        currentsong_dict: dict,
+        playlist_length: int = 10,
+        position: int = 5,
+    ):
         """Helper to create a mocked MPD client with specified responses.
 
         Args:
@@ -106,8 +110,13 @@ class TestIntegrationScenarios:
         mock_client.playlistinfo.side_effect = mock_playlistinfo_func
         return mock_client
 
-    def _insert_track_in_db(self, video_id: str, stream_url: str | None,
-                            title: str = "Test Title", artist: str = "Test Artist"):
+    def _insert_track_in_db(
+        self,
+        video_id: str,
+        stream_url: str | None,
+        title: str = "Test Title",
+        artist: str = "Test Artist",
+    ):
         """Helper to insert a track into the test database.
 
         Args:
@@ -119,8 +128,10 @@ class TestIntegrationScenarios:
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO tracks (video_id, title, artist, stream_url, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (video_id, title, artist, stream_url, 1234567890)
+            "INSERT INTO tracks"
+            " (video_id, title, artist, stream_url, updated_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (video_id, title, artist, stream_url, 1234567890),
         )
         conn.commit()
         conn.close()
@@ -135,21 +146,22 @@ class TestIntegrationScenarios:
         # Setup
         mock_home.return_value = Path(self.temp_dir)
         video_id = "dQw4w9WgXcQ"
-        self._insert_track_in_db(video_id, "https://googlevideo.com/stream123",
-                                 "Never Gonna Give You Up", "Rick Astley")
+        self._insert_track_in_db(
+            video_id, "https://googlevideo.com/stream123", "Never Gonna Give You Up", "Rick Astley"
+        )
 
         status = {
             "state": "play",
             "elapsed": "150",  # 2:30
             "duration": "300",  # 5:00
             "song": "4",  # 0-indexed position
-            "playlistlength": "10"
+            "playlistlength": "10",
         }
         currentsong = {
             "file": f"http://localhost:6602/proxy/{video_id}",
             "title": "Never Gonna Give You Up",
             "artist": "Rick Astley",
-            "time": "300"
+            "time": "300",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 10, 4)
@@ -157,6 +169,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         with patch("sys.stdout", captured_output):
@@ -174,7 +187,9 @@ class TestIntegrationScenarios:
         # Check track info (artist always shown, title may be truncated)
         assert "Rick Astley" in lines[0], "Should show artist"
         # Title might be truncated due to default max length, just check partial match
-        assert "Never Gonna" in lines[0] or "Give You Up" in lines[0], "Should show title (or part of it)"
+        assert (
+            "Never Gonna" in lines[0] or "Give You Up" in lines[0]
+        ), "Should show title (or part of it)"
 
         # Check timing (elapsed time might be truncated, but duration should be there)
         # The output shows elapsed time may be cut off due to truncation
@@ -186,7 +201,7 @@ class TestIntegrationScenarios:
         # This is expected behavior when artist + title + times take up most of the space
 
         # Check color (orange for YouTube playing)
-        assert lines[2] == "#FF6B35", "Should have orange color for YouTube playing"
+        assert lines[2] == "#f7768e", "Should have pink color for YouTube playing"
 
     @patch("ytmpd_status_integration.get_mpd_client")
     @patch("ytmpd_status_integration.Path.home")
@@ -203,13 +218,13 @@ class TestIntegrationScenarios:
             "elapsed": "120",  # 2:00
             "duration": "240",  # 4:00
             "song": "4",  # Middle of playlist (0-indexed)
-            "playlistlength": "10"
+            "playlistlength": "10",
         }
         currentsong = {
             "file": "/music/local/track.mp3",
             "title": "Local Track",
             "artist": "Local Artist",
-            "time": "240"
+            "time": "240",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 10, 4)
@@ -217,6 +232,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         with patch("sys.stdout", captured_output):
@@ -235,7 +251,7 @@ class TestIntegrationScenarios:
         assert "█" in lines[0] or "░" in lines[0], "Should have blocks progress bar"
 
         # Check color (yellow for local paused)
-        assert lines[2] == "#FFFF00", "Should have yellow color for local paused"
+        assert lines[2] == "#5ab3dd", "Should have deeper cyan for local paused"
 
         # Check no position indicator (mid-playlist)
         assert "[5/10]" not in lines[0], "Should not show position for mid-playlist track"
@@ -258,13 +274,13 @@ class TestIntegrationScenarios:
             "elapsed": "30",
             "duration": "180",
             "song": "0",
-            "playlistlength": "5"
+            "playlistlength": "5",
         }
         currentsong = {
             "file": f"http://localhost:6602/proxy/{video_id}",
             "title": "Unresolved Track",
             "artist": "Artist",
-            "time": "180"
+            "time": "180",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 5, 0)
@@ -272,6 +288,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         with patch("sys.stdout", captured_output):
@@ -287,7 +304,7 @@ class TestIntegrationScenarios:
         assert "[Resolving...]" in lines[0], "Should show resolving message for unresolved track"
 
         # Check color (orange for YouTube)
-        assert lines[2] == "#FF6B35", "Should have orange color"
+        assert lines[2] == "#f7768e", "Should have pink color"
 
     @patch("ytmpd_status_integration.get_mpd_client")
     @patch("ytmpd_status_integration.Path.home")
@@ -304,13 +321,13 @@ class TestIntegrationScenarios:
             "elapsed": "10",
             "duration": "200",
             "song": "0",  # First track (0-indexed)
-            "playlistlength": "25"
+            "playlistlength": "25",
         }
         currentsong = {
             "file": "/music/first.mp3",
             "title": "First Track",
             "artist": "Artist",
-            "time": "200"
+            "time": "200",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 25, 0)
@@ -318,6 +335,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         with patch("sys.stdout", captured_output):
@@ -347,13 +365,13 @@ class TestIntegrationScenarios:
             "elapsed": "50",
             "duration": "180",
             "song": "24",  # Last track (0-indexed, 25 tracks total)
-            "playlistlength": "25"
+            "playlistlength": "25",
         }
         currentsong = {
             "file": "/music/last.mp3",
             "title": "Last Track",
             "artist": "Artist",
-            "time": "180"
+            "time": "180",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 25, 24)
@@ -361,6 +379,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         with patch("sys.stdout", captured_output):
@@ -382,9 +401,7 @@ class TestIntegrationScenarios:
         Expected: Stop icon, gray color, "Stopped" message.
         """
         # Setup - MPD returns stopped state
-        status = {
-            "state": "stop"
-        }
+        status = {"state": "stop"}
         # currentsong should be None to trigger stopped state
         currentsong = None
 
@@ -395,6 +412,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         # sys.exit() raises SystemExit, so we need to catch it
@@ -415,7 +433,7 @@ class TestIntegrationScenarios:
         assert "Stopped" in lines[0], "Should show stopped message"
 
         # Check color (gray)
-        assert lines[2] == "#808080", "Should have gray color for stopped"
+        assert lines[2] == "#565f89", "Should have slate color for stopped"
 
     @patch("ytmpd_status_integration.get_mpd_client")
     @patch("ytmpd_status_integration.Path.home")
@@ -428,20 +446,23 @@ class TestIntegrationScenarios:
         mock_home.return_value = Path(self.temp_dir)
 
         # Very long title
-        long_title = "This Is An Extremely Long Song Title That Should Be Truncated By The Smart Truncation Algorithm"
+        long_title = (
+            "This Is An Extremely Long Song Title That Should Be"
+            " Truncated By The Smart Truncation Algorithm"
+        )
 
         status = {
             "state": "play",
             "elapsed": "60",
             "duration": "300",
             "song": "5",
-            "playlistlength": "10"
+            "playlistlength": "10",
         }
         currentsong = {
             "file": "/music/long.mp3",
             "title": long_title,
             "artist": "Short Artist",
-            "time": "300"
+            "time": "300",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 10, 5)
@@ -451,6 +472,7 @@ class TestIntegrationScenarios:
         with patch.dict(os.environ, {"YTMPD_STATUS_MAX_LENGTH": "50"}):
             # Capture output
             from io import StringIO
+
             captured_output = StringIO()
 
             with patch("sys.stdout", captured_output):
@@ -486,13 +508,13 @@ class TestIntegrationScenarios:
             "elapsed": "60",
             "duration": "180",
             "song": "5",
-            "playlistlength": "10"
+            "playlistlength": "10",
         }
         currentsong = {
             "file": "/music/current.mp3",
             "title": "Current Track",
             "artist": "Current Artist",
-            "time": "180"
+            "time": "180",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 10, 5)
@@ -502,6 +524,7 @@ class TestIntegrationScenarios:
         with patch.dict(os.environ, {"YTMPD_STATUS_SHOW_NEXT": "true"}):
             # Capture output
             from io import StringIO
+
             captured_output = StringIO()
 
             with patch("sys.stdout", captured_output):
@@ -533,13 +556,13 @@ class TestIntegrationScenarios:
             "state": "play",
             "elapsed": "45",
             "song": "2",
-            "playlistlength": "5"
+            "playlistlength": "5",
             # No duration field
         }
         currentsong = {
             "file": "http://stream.example.com/live",
             "title": "Live Stream",
-            "artist": "Radio Station"
+            "artist": "Radio Station",
             # No time field
         }
 
@@ -548,6 +571,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         with patch("sys.stdout", captured_output):
@@ -585,13 +609,13 @@ class TestIntegrationScenarios:
             "elapsed": "30",
             "duration": "120",
             "song": "1",
-            "playlistlength": "5"
+            "playlistlength": "5",
         }
         currentsong = {
             "file": f"http://localhost:6602/proxy/{video_id}",
             "title": "Unknown Track",
             "artist": "Unknown Artist",
-            "time": "120"
+            "time": "120",
         }
 
         mock_client = self._create_mock_mpd_client(status, currentsong, 5, 1)
@@ -599,6 +623,7 @@ class TestIntegrationScenarios:
 
         # Capture output
         from io import StringIO
+
         captured_output = StringIO()
 
         with patch("sys.stdout", captured_output):
@@ -615,7 +640,7 @@ class TestIntegrationScenarios:
         assert "Unknown Track" in lines[0], "Should show title"
 
         # Should use YouTube color (detected from proxy URL)
-        assert lines[2] == "#FF6B35", "Should use YouTube color"
+        assert lines[2] == "#f7768e", "Should use YouTube color"
 
 
 class TestEnvironmentVariableIntegration:
@@ -654,6 +679,7 @@ class TestEnvironmentVariableIntegration:
     def teardown_method(self):
         """Clean up test fixtures."""
         import shutil
+
         shutil.rmtree(self.temp_dir)
 
         # Restore original environment variables
@@ -675,13 +701,13 @@ class TestEnvironmentVariableIntegration:
             "elapsed": "90",
             "duration": "200",
             "song": "3",
-            "playlistlength": "10"
+            "playlistlength": "10",
         }
         currentsong = {
             "file": "/music/test.mp3",
             "title": "Test Track With A Reasonably Long Title",
             "artist": "Test Artist",
-            "time": "200"
+            "time": "200",
         }
 
         mock_client = MagicMock()
@@ -706,12 +732,13 @@ class TestEnvironmentVariableIntegration:
             "YTMPD_STATUS_SHOW_BAR": "true",
             "YTMPD_STATUS_BAR_STYLE": "simple",
             "YTMPD_STATUS_SHOW_NEXT": "true",
-            "YTMPD_STATUS_SHOW_PREV": "false"
+            "YTMPD_STATUS_SHOW_PREV": "false",
         }
 
         with patch.dict(os.environ, env_vars):
             # Capture output
             from io import StringIO
+
             captured_output = StringIO()
 
             with patch("sys.stdout", captured_output):
@@ -743,13 +770,13 @@ class TestEnvironmentVariableIntegration:
             "elapsed": "60",
             "duration": "180",
             "song": "0",
-            "playlistlength": "5"
+            "playlistlength": "5",
         }
         currentsong = {
             "file": "/music/compact.mp3",
             "title": "Compact Track",
             "artist": "Compact Artist",
-            "time": "180"
+            "time": "180",
         }
 
         mock_client = MagicMock()
@@ -762,6 +789,7 @@ class TestEnvironmentVariableIntegration:
         with patch.dict(os.environ, {"YTMPD_STATUS_COMPACT": "true"}):
             # Capture output
             from io import StringIO
+
             captured_output = StringIO()
 
             with patch("sys.stdout", captured_output):
@@ -775,8 +803,9 @@ class TestEnvironmentVariableIntegration:
 
         # Compact mode: no time, no progress bar
         assert "[" not in lines[0], "Compact mode should not have time brackets"
-        assert "█" not in lines[0] and "▰" not in lines[0] and "#" not in lines[0], \
-            "Compact mode should not have progress bar"
+        assert (
+            "█" not in lines[0] and "▰" not in lines[0] and "#" not in lines[0]
+        ), "Compact mode should not have progress bar"
 
         # Should have icon, artist, and title
         assert "▶" in lines[0], "Should have play icon"
@@ -795,13 +824,13 @@ class TestEnvironmentVariableIntegration:
             "elapsed": "45",
             "duration": "200",
             "song": "2",
-            "playlistlength": "5"
+            "playlistlength": "5",
         }
         currentsong = {
             "file": "/music/nobar.mp3",
             "title": "No Bar Track",
             "artist": "No Bar Artist",
-            "time": "200"
+            "time": "200",
         }
 
         mock_client = MagicMock()
@@ -814,6 +843,7 @@ class TestEnvironmentVariableIntegration:
         with patch.dict(os.environ, {"YTMPD_STATUS_SHOW_BAR": "false"}):
             # Capture output
             from io import StringIO
+
             captured_output = StringIO()
 
             with patch("sys.stdout", captured_output):

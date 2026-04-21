@@ -74,9 +74,9 @@ pkill -SIGUSR1 i3blocks
 
    You should see output like:
    ```
-   ▶ Artist Name - Song Title ▰▰▰▰▱▱▱▱▱▱ 2:30/5:00]
-   ▶ Artist Name - Song Title ▰▰▰▰▱▱▱▱▱▱ 2:30/5:00]
-   #FF6B35
+   ▶ Artist Name - Song Title ████░░░░░░ 2:30/5:00]
+   ▶ Artist Name - Song Title ████░░░░░░ 2:30/5:00]
+   #f7768e
    ```
 
 3. **Add to i3blocks config** (see [Configuration](#configuration))
@@ -229,11 +229,11 @@ ytmpd-status --format "{artist} - {title} {bar} [{position}/{total}]"
 
 ```bash
 ytmpd-status \
-  --color-youtube-playing "#FF0000" \
-  --color-youtube-paused "#FFB84D" \
-  --color-local-playing "#00FF00" \
-  --color-local-paused "#FFFF00" \
-  --color-stopped "#808080"
+  --color-youtube-playing "#f7768e" \
+  --color-youtube-paused "#d9677b" \
+  --color-local-playing "#7dcfff" \
+  --color-local-paused "#5ab3dd" \
+  --color-stopped "#565f89"
 ```
 
 #### Custom Icons
@@ -501,8 +501,8 @@ markup=none
 ```ini
 [ytmpd-status]
 command=/path/to/ytmpd-status --idle --handle-clicks --compact \
-  --color-youtube-playing "#FF6B35" \
-  --color-local-playing "#00FF00"
+  --color-youtube-playing "#f7768e" \
+  --color-local-playing "#7dcfff"
 interval=persist
 signal=10
 markup=none

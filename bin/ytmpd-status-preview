@@ -1,0 +1,435 @@
+#!/usr/bin/env python3
+"""Terminal preview for ytmpd-status palette & bar glyph options.
+
+Prints styled mock widget lines with 24-bit ANSI color so you can compare
+palette/bar-glyph combinations before committing any change to the widget.
+
+Runs standalone (stdlib only). Does NOT touch the live widget or ytmpd.
+
+Usage:
+  ytmpd-status-preview                    # everything
+  ytmpd-status-preview --only palettes
+  ytmpd-status-preview --only bars
+  ytmpd-status-preview --only combos
+  ytmpd-status-preview --palette tokyonight --bar slider
+  ytmpd-status-preview --bg dark          # simulate dark translucent i3bar bg
+"""
+
+import argparse
+import sys
+
+BAR_LEN = 12
+MAX_LEN = 65
+
+
+# --- Palette definitions ---------------------------------------------------
+
+PALETTES = {
+    "current": {
+        "name": "Current (baseline)",
+        "yt_play": "#FF6B35",
+        "yt_pause": "#FFB84D",
+        "local_play": "#00FF00",
+        "local_pause": "#FFFF00",
+        "stopped": "#808080",
+        "auth_err": "#FF0000",
+        "auth_warn": "#FFA500",
+    },
+    "tokyonight": {
+        "name": "Tokyonight (recommended)",
+        "yt_play": "#ff9e64",
+        "yt_pause": "#e0af68",
+        "local_play": "#7aa2f7",
+        "local_pause": "#bb9af7",
+        "stopped": "#565f89",
+        "auth_err": "#f7768e",
+        "auth_warn": "#db4b4b",
+    },
+    "storm": {
+        "name": "Tokyonight storm (deeper)",
+        "yt_play": "#ff9e64",
+        "yt_pause": "#d9a05a",
+        "local_play": "#5a7aca",
+        "local_pause": "#9d7cd8",
+        "stopped": "#414868",
+        "auth_err": "#db4b4b",
+        "auth_warn": "#cc6060",
+    },
+    "duo": {
+        "name": "Cyan/pink duo",
+        "yt_play": "#f7768e",
+        "yt_pause": "#d9677b",
+        "local_play": "#7dcfff",
+        "local_pause": "#5ab3dd",
+        "stopped": "#565f89",
+        "auth_err": "#ff5577",
+        "auth_warn": "#e0af68",
+    },
+    "muted-tn": {
+        "name": "Tokyonight muted (lower sat)",
+        "yt_play": "#d98a5c",
+        "yt_pause": "#b8925c",
+        "local_play": "#6b8ed0",
+        "local_pause": "#9a82cf",
+        "stopped": "#4a5170",
+        "auth_err": "#d66b7f",
+        "auth_warn": "#b85858",
+    },
+}
+
+
+# --- Bar glyph styles ------------------------------------------------------
+
+
+def bar_blocks(r, n):
+    f = int(r * n)
+    return "█" * f + "░" * (n - f)
+
+
+def bar_blocks_gradual(r, n):
+    parts = " ▏▎▍▌▋▊▉█"
+    exact = r * n
+    full = int(exact)
+    frac = exact - full
+    level = int(round(frac * 8))
+    out = "█" * full
+    if full < n:
+        if level > 0 and level < 9:
+            out += parts[level]
+            out += "░" * (n - full - 1)
+        else:
+            out += "░" * (n - full)
+    return out
+
+
+def bar_smooth(r, n):
+    f = int(r * n)
+    return "▰" * f + "▱" * (n - f)
+
+
+def bar_slider(r, n):
+    f = int(r * n)
+    if f <= 0:
+        return "┈" * n
+    if f >= n:
+        return "━" * n
+    return "━" * (f - 1) + "╸" + "┈" * (n - f)
+
+
+def bar_dots(r, n):
+    f = int(r * n)
+    return "●" * f + "○" * (n - f)
+
+
+def bar_diamond(r, n):
+    f = int(r * n)
+    return "◆" * f + "◇" * (n - f)
+
+
+def bar_refined(r, n):
+    f = int(r * n)
+    return "▮" * f + "▯" * (n - f)
+
+
+def bar_braille(r, n):
+    f = int(r * n)
+    return "⣿" * f + "⣀" * (n - f)
+
+
+def bar_braille_track(r, n):
+    f = int(r * n)
+    return "⣿" * f + "⠒" * (n - f)
+
+
+def bar_braille_gradient(r, n):
+    levels = ["⠀", "⣀", "⣤", "⣶", "⣿"]
+    filled = r * n
+    out = []
+    for i in range(n):
+        col_fill = max(0.0, min(1.0, filled - i))
+        out.append(levels[int(col_fill * 4)])
+    return "".join(out)
+
+
+def bar_heavy(r, n):
+    f = int(r * n)
+    return "▬" * f + "▭" * (n - f)
+
+
+def bar_arrow(r, n):
+    f = int(r * n)
+    if f <= 0:
+        return "─" * n
+    if f >= n:
+        return "━" * n
+    return "━" * (f - 1) + "▶" + "─" * (n - f)
+
+
+def bar_dashes(r, n):
+    f = int(r * n)
+    return "━" * f + "─" * (n - f)
+
+
+BARS = [
+    ("blocks", "████░░░░ (current local)", bar_blocks),
+    ("blocks-gradual", "████▍░░░ (fractional last char)", bar_blocks_gradual),
+    ("smooth", "▰▰▰▰▱▱▱▱ (current YT)", bar_smooth),
+    ("slider", "━━━╸┈┈┈┈ (cap + leader)", bar_slider),
+    ("dashes", "━━━━──── (weighted dashes)", bar_dashes),
+    ("dots", "●●●●○○○○ (uniform dots)", bar_dots),
+    ("diamond", "◆◆◆◆◇◇◇◇ (diamonds)", bar_diamond),
+    ("refined", "▮▮▮▮▯▯▯▯ (small blocks)", bar_refined),
+    ("braille", "⣿⣿⣿⣿⣀⣀⣀⣀ (flat braille)", bar_braille),
+    ("braille-track", "⣿⣿⣿⣿⠒⠒⠒⠒ (braille + track)", bar_braille_track),
+    ("braille-gradient", "⣿⣿⣶⣤⣀⠀⠀⠀ (gradient edge)", bar_braille_gradient),
+    ("heavy-horiz", "▬▬▬▬▭▭▭▭ (heavy horiz)", bar_heavy),
+    ("arrow", "━━━▶──── (arrow head)", bar_arrow),
+]
+
+BAR_FNS = {k: fn for k, _, fn in BARS}
+
+
+# --- ANSI helpers ----------------------------------------------------------
+
+
+def hex_to_rgb(hx):
+    hx = hx.lstrip("#")
+    return int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16)
+
+
+def fg(hex_color):
+    r, g, b = hex_to_rgb(hex_color)
+    return f"\x1b[38;2;{r};{g};{b}m"
+
+
+RESET = "\x1b[0m"
+DIM = "\x1b[2m"
+
+
+def bg_wrap(s, bg_mode):
+    if bg_mode == "dark":
+        return f"\x1b[48;2;15;15;23m{s}\x1b[49m"
+    return s
+
+
+# --- Mock line rendering ---------------------------------------------------
+
+
+def render_line(icon, artist, title, elapsed, duration, bar_str, suffix=""):
+    core = f"{icon} {artist} - {title} [{elapsed} {bar_str} {duration}]{suffix}"
+    if len(core) > MAX_LEN:
+        core = core[: MAX_LEN - 1] + "…"
+    return core
+
+
+def preview_palettes(palettes, bar_fn, bar_label, bg_mode):
+    print(f"\n{DIM}=== Palettes (bar glyph: {bar_label}) ==={RESET}\n")
+
+    states = [
+        ("YT playing", "yt_play", "▶", "Fleetwood Mac", "Dreams", "2:13", "4:17", 0.52),
+        ("YT paused", "yt_pause", "⏸", "Fleetwood Mac", "Dreams", "2:13", "4:17", 0.52),
+        (
+            "Local playing",
+            "local_play",
+            "▶",
+            "Radiohead",
+            "Weird Fishes",
+            "3:01",
+            "5:18",
+            0.57,
+        ),
+        (
+            "Local paused",
+            "local_pause",
+            "⏸",
+            "Radiohead",
+            "Weird Fishes",
+            "3:01",
+            "5:18",
+            0.57,
+        ),
+        ("Stopped", "stopped", "⏹", "—", "Stopped", "—", "—", 0.0),
+        ("Auth invalid", "auth_err", "⏹", "—", "Auth invalid", "—", "—", 0.0),
+        ("Refresh failing", "auth_warn", "⏹", "—", "Refresh failing", "—", "—", 0.0),
+    ]
+
+    for key, pal in palettes.items():
+        print(f"  {DIM}{pal['name']:<28}{RESET}  ({key})")
+        for label, ck, icon, artist, title, el, dur, ratio in states:
+            color = pal[ck]
+            if ratio > 0:
+                bar = bar_fn(ratio, BAR_LEN)
+                line = render_line(icon, artist, title, el, dur, bar)
+            else:
+                line = f"{icon} {title}"
+            styled = f"{fg(color)}{line}{RESET}"
+            styled = bg_wrap(styled, bg_mode)
+            print(f"    {DIM}{label:<18}{RESET} {styled}")
+        print()
+
+
+def preview_bars(palette_key, palettes, bg_mode):
+    pal = palettes[palette_key]
+    print(f"\n{DIM}=== Bar glyphs at progress levels (palette: {pal['name']}) ==={RESET}\n")
+
+    ratios = [0.0, 0.15, 0.38, 0.62, 0.85, 1.0]
+    samples = [
+        ("YT playing", pal["yt_play"]),
+        ("Local playing", pal["local_play"]),
+    ]
+
+    header = "  ".join(f"{int(r*100):>3d}%".ljust(BAR_LEN) for r in ratios)
+    for label, color in samples:
+        print(f"  {DIM}{label}  ({color}){RESET}")
+        print(f"    {DIM}{'':<18} {header}{RESET}")
+        for style_key, _, fn in BARS:
+            row = "  ".join(fn(r, BAR_LEN).ljust(BAR_LEN) for r in ratios)
+            styled = f"{fg(color)}{row}{RESET}"
+            styled = bg_wrap(styled, bg_mode)
+            print(f"    {DIM}{style_key:<18}{RESET} {styled}")
+        print()
+
+
+def preview_combos(palette_key, palettes, bg_mode):
+    pal = palettes[palette_key]
+    print(f"\n{DIM}=== Full lines: {pal['name']} × every bar glyph ==={RESET}\n")
+
+    scenarios = [
+        (
+            "YT playing",
+            "yt_play",
+            "▶",
+            "Tame Impala",
+            "The Less I Know the Better",
+            "1:47",
+            "3:36",
+            0.49,
+        ),
+        (
+            "YT paused",
+            "yt_pause",
+            "⏸",
+            "Tame Impala",
+            "The Less I Know the Better",
+            "1:47",
+            "3:36",
+            0.49,
+        ),
+        ("Local playing", "local_play", "▶", "Aphex Twin", "Avril 14th", "0:58", "2:05", 0.46),
+        ("Local paused", "local_pause", "⏸", "Aphex Twin", "Avril 14th", "0:58", "2:05", 0.46),
+    ]
+
+    for label, ck, icon, artist, title, el, dur, ratio in scenarios:
+        print(f"  {DIM}{label}  ({pal[ck]}){RESET}")
+        color = pal[ck]
+        for style_key, _, fn in BARS:
+            bar = fn(ratio, BAR_LEN)
+            line = render_line(icon, artist, title, el, dur, bar)
+            styled = f"{fg(color)}{line}{RESET}"
+            styled = bg_wrap(styled, bg_mode)
+            print(f"    {DIM}{style_key:<18}{RESET} {styled}")
+        print()
+
+
+def preview_neighbor_context(palettes, bar_fn, bg_mode):
+    """Render the ytmpd line alongside mock neighbor widgets to sanity-check
+    integration with the rest of the bar (ssid, locale, user, syncthing, etc.)."""
+    print(f"\n{DIM}=== Neighbor context (how it sits next to other widgets) ==={RESET}\n")
+
+    neighbors = [
+        ("ssid", "#b0235c", "⌁ HomeNet"),
+        ("locale", "#2eec99", "us"),
+        ("user", "#ff3366", "tunc@NULL"),
+        ("syncthing", "#62D1F4", "ST ok"),
+        ("focus-ref", "#7fbeff", "i3 focus"),
+    ]
+
+    for key, pal in palettes.items():
+        print(f"  {DIM}{pal['name']:<28}{RESET}  ({key})")
+        # build one mock bar strip: ytmpd first, then neighbors
+        ytmpd_line = render_line(
+            "▶",
+            "Tame Impala",
+            "The Less I Know the Better",
+            "1:47",
+            "3:36",
+            bar_fn(0.49, BAR_LEN),
+        )
+        ytmpd_part = bg_wrap(f"{fg(pal['yt_play'])}{ytmpd_line}{RESET}", bg_mode)
+        neighbor_parts = [bg_wrap(f"{fg(c)}{t}{RESET}", bg_mode) for _, c, t in neighbors]
+        sep = bg_wrap(f"{DIM} │ {RESET}", bg_mode)
+        print(f"    {ytmpd_part}{sep}" + sep.join(neighbor_parts))
+        print()
+
+
+# --- Main ------------------------------------------------------------------
+
+
+def main():
+    p = argparse.ArgumentParser(
+        prog="ytmpd-status-preview",
+        description="Preview palette & bar glyph options for ytmpd-status.",
+    )
+    p.add_argument(
+        "--palette",
+        choices=list(PALETTES.keys()) + ["all"],
+        default="all",
+        help="Restrict to a single palette (default: all)",
+    )
+    p.add_argument(
+        "--bar",
+        choices=[b[0] for b in BARS] + ["all"],
+        default="all",
+        help="Restrict to a single bar glyph style (default: all)",
+    )
+    p.add_argument(
+        "--only",
+        choices=["palettes", "bars", "combos", "neighbors"],
+        help="Show only one section",
+    )
+    p.add_argument(
+        "--bg",
+        choices=["default", "dark"],
+        default="default",
+        help="Background: 'dark' approximates the translucent i3bar bg",
+    )
+    args = p.parse_args()
+
+    palettes = PALETTES if args.palette == "all" else {args.palette: PALETTES[args.palette]}
+
+    if args.bar != "all":
+        bar_fn = BAR_FNS[args.bar]
+        bar_label = args.bar
+    else:
+        bar_fn = bar_slider
+        bar_label = "slider (━━╸┈)"
+
+    print(f"\n{DIM}ytmpd-status preview — palette & bar glyph comparison{RESET}")
+    print(f"{DIM}bar_length={BAR_LEN}  max_length={MAX_LEN}  (matches your i3blocks config){RESET}")
+    print(
+        f"{DIM}Note: terminal font ≠ i3bar Terminus 9pt."
+        f" Braille & box glyphs match structurally.{RESET}"
+    )
+
+    sections = [args.only] if args.only else ["palettes", "bars", "combos", "neighbors"]
+
+    if "palettes" in sections:
+        preview_palettes(palettes, bar_fn, bar_label, args.bg)
+
+    if "bars" in sections:
+        key = "tokyonight" if "tokyonight" in palettes else next(iter(palettes))
+        preview_bars(key, palettes, args.bg)
+
+    if "combos" in sections:
+        key = "tokyonight" if "tokyonight" in palettes else next(iter(palettes))
+        preview_combos(key, palettes, args.bg)
+
+    if "neighbors" in sections:
+        preview_neighbor_context(palettes, bar_fn, args.bg)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (BrokenPipeError, KeyboardInterrupt):
+        sys.exit(0)
