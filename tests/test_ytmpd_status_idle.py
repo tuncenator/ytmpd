@@ -5,9 +5,8 @@ import importlib.util
 import os
 import signal
 import sys
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -16,7 +15,7 @@ script_path = Path(__file__).parent.parent / "bin" / "ytmpd-status"
 spec = importlib.util.spec_from_file_location(
     "ytmpd_status_idle_tests",
     script_path,
-    loader=importlib.machinery.SourceFileLoader("ytmpd_status_idle_tests", str(script_path))
+    loader=importlib.machinery.SourceFileLoader("ytmpd_status_idle_tests", str(script_path)),
 )
 ytmpd_status_idle = importlib.util.module_from_spec(spec)
 sys.modules["ytmpd_status_idle_tests"] = ytmpd_status_idle
@@ -226,11 +225,11 @@ class TestDisplayStatus:
         mock_args.icon_playing = "▶"
         mock_args.icon_paused = "⏸"
         mock_args.icon_stopped = "⏹"
-        mock_args.color_local_playing = "#00FF00"
-        mock_args.color_local_paused = "#FFFF00"
-        mock_args.color_youtube_playing = "#FF6B35"
-        mock_args.color_youtube_paused = "#FFB84D"
-        mock_args.color_stopped = "#808080"
+        mock_args.color_local_playing = "#7dcfff"
+        mock_args.color_local_paused = "#5ab3dd"
+        mock_args.color_youtube_playing = "#f7768e"
+        mock_args.color_youtube_paused = "#d9677b"
+        mock_args.color_stopped = "#565f89"
         mock_args.max_length = 50
         mock_args.bar_length = 10
         mock_args.show_bar = True
@@ -246,7 +245,7 @@ class TestDisplayStatus:
         # Check output
         captured = capsys.readouterr()
         assert "▶ Test Artist - Test Song" in captured.out
-        assert "#00FF00" in captured.out
+        assert "#7dcfff" in captured.out
 
     @patch("ytmpd_status_idle_tests.get_track_type")
     @patch("ytmpd_status_idle_tests.get_playlist_context")
@@ -262,27 +261,25 @@ class TestDisplayStatus:
 
         mock_args = MagicMock()
         mock_args.icon_stopped = "⏹"
-        mock_args.color_stopped = "#808080"
+        mock_args.color_stopped = "#565f89"
 
         ytmpd_status_idle.display_status(mock_client, mock_args)
 
         captured = capsys.readouterr()
         assert "⏹ Stopped" in captured.out
-        assert "#808080" in captured.out
+        assert "#565f89" in captured.out
 
     @patch("ytmpd_status_idle_tests.get_track_type")
     @patch("ytmpd_status_idle_tests.get_playlist_context")
     @patch("ytmpd_status_idle_tests.get_sync_status")
-    def test_display_status_exception(
-        self, mock_sync, mock_playlist, mock_track_type, capsys
-    ):
+    def test_display_status_exception(self, mock_sync, mock_playlist, mock_track_type, capsys):
         """Test display_status handles exceptions gracefully."""
         mock_client = MagicMock()
         mock_client.status.side_effect = Exception("Test error")
 
         mock_args = MagicMock()
         mock_args.icon_stopped = "⏹"
-        mock_args.color_stopped = "#808080"
+        mock_args.color_stopped = "#565f89"
 
         ytmpd_status_idle.display_status(mock_client, mock_args)
 
@@ -290,7 +287,9 @@ class TestDisplayStatus:
         assert "Error" in captured.out
 
 
-@pytest.mark.skip(reason="Idle mode tests cause memory issues due to infinite loop mocking - needs refactoring")
+@pytest.mark.skip(
+    reason="Idle mode tests cause memory issues due to infinite loop mocking - needs refactoring"
+)
 class TestIdleMode:
     """Test idle mode functionality."""
 
@@ -298,9 +297,7 @@ class TestIdleMode:
     @patch("ytmpd_status_idle_tests.get_mpd_client")
     @patch("ytmpd_status_idle_tests.display_status")
     @patch("ytmpd_status_idle_tests.time.sleep")
-    def test_run_idle_mode_basic(
-        self, mock_sleep, mock_display, mock_get_client, mock_signal
-    ):
+    def test_run_idle_mode_basic(self, mock_sleep, mock_display, mock_get_client, mock_signal):
         """Test basic idle mode operation."""
         # Setup mocks
         mock_client = MagicMock()
@@ -424,9 +421,7 @@ class TestIdleMode:
     @patch("ytmpd_status_idle_tests.signal.signal")
     @patch("ytmpd_status_idle_tests.get_mpd_client")
     @patch("ytmpd_status_idle_tests.display_status")
-    def test_run_idle_mode_manual_refresh(
-        self, mock_display, mock_get_client, mock_signal
-    ):
+    def test_run_idle_mode_manual_refresh(self, mock_display, mock_get_client, mock_signal):
         """Test idle mode responds to manual refresh signal."""
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
