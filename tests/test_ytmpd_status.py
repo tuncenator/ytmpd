@@ -1081,7 +1081,7 @@ class TestContextAwareMessaging:
     @patch("ytmpd_status.get_mpd_client")
     @patch("ytmpd_status.get_track_type")
     @patch("ytmpd_status.get_playlist_context")
-    @patch("sys.argv", ["ytmpd-status"])
+    @patch("sys.argv", ["ytmpd-status", "--show-position"])
     @patch("ytmpd_status.get_sync_status")
     def test_first_track_position(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
         """Test position display for first track."""
@@ -1110,7 +1110,7 @@ class TestContextAwareMessaging:
     @patch("ytmpd_status.get_mpd_client")
     @patch("ytmpd_status.get_track_type")
     @patch("ytmpd_status.get_playlist_context")
-    @patch("sys.argv", ["ytmpd-status"])
+    @patch("sys.argv", ["ytmpd-status", "--show-position"])
     @patch("ytmpd_status.get_sync_status")
     def test_last_track_position(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
         """Test position display for last track."""
@@ -1139,7 +1139,7 @@ class TestContextAwareMessaging:
     @patch("ytmpd_status.get_mpd_client")
     @patch("ytmpd_status.get_track_type")
     @patch("ytmpd_status.get_playlist_context")
-    @patch("sys.argv", ["ytmpd-status"])
+    @patch("sys.argv", ["ytmpd-status", "--show-position"])
     @patch("ytmpd_status.get_sync_status")
     def test_single_track_playlist(self, mock_sync, mock_ctx, mock_track, mock_client, capsys):
         """Test position display for single track playlist."""
