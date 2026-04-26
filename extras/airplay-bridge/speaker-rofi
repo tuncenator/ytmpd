@@ -71,7 +71,7 @@ fi
 # Present menu. Display labels only; the action is resolved via parallel array
 # after rofi returns the selected line (no in-band separator, no rendering glitches).
 selected=$(printf '%s\n' "${labels[@]}" \
-  | rofi -dmenu -i -p "speaker" -lines "${#labels[@]}" -no-custom -matching fuzzy \
+  | rofi -font 'Terminus (TTF) 12' -dmenu -i -p "speaker" -lines "${#labels[@]}" -no-custom -matching fuzzy \
       2>/dev/null) || exit 0
 
 [[ -z "$selected" ]] && exit 0

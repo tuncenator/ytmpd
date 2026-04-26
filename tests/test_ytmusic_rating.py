@@ -122,24 +122,21 @@ class TestYTMusicClientRating:
     def test_get_track_rating_missing_like_status(
         self, client: YTMusicClient, mock_ytmusic: Mock
     ) -> None:
-        """Test error handling when likeStatus field is missing."""
-        # Mock API response without likeStatus field
+        """Missing likeStatus is treated as NEUTRAL (e.g. MUSIC_VIDEO_TYPE_ATV)."""
         mock_ytmusic.get_watch_playlist.return_value = {
             "tracks": [
                 {
                     "videoId": "test999",
                     "title": "No Rating Field",
-                    # Missing likeStatus
+                    # Missing likeStatus -> None
                 }
             ]
         }
 
         client._client = mock_ytmusic
+        rating = client.get_track_rating("test999")
 
-        with pytest.raises(YTMusicAPIError) as exc_info:
-            client.get_track_rating("test999")
-
-        assert "likeStatus" in str(exc_info.value)
+        assert rating == RatingState.NEUTRAL
 
     def test_get_track_rating_api_error(self, client: YTMusicClient, mock_ytmusic: Mock) -> None:
         """Test error handling when API call fails."""
